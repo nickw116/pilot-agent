@@ -5,6 +5,7 @@ import { registerSubscriber, unregisterSubscriber, publish } from "./sse.js";
 import * as agentModule from "./agent.js";
 import * as authMod from "./auth.js";
 import * as sessionMod from "./session.js";
+import { getContextStats } from "./compaction.js";
 
 const PORT = parseInt(process.env.PORT || "8081", 10);
 
@@ -224,6 +225,15 @@ app.post("/api/upload", auth, (_req, res) => {
 
 app.get("/api/download", auth, (_req, res) => {
   res.status(404).json({ detail: "not implemented in MVP" });
+});
+
+// --- Context stats ---
+
+app.get("/api/context/stats", auth, (req, res) => {
+  const user = (req as any).user;
+  const sessionKey = (req.query.sessionKey as string) ||
+    sessionMod.getOrCreateActiveSession(user.userId, user.username).session_key;
+  res.json(getContextStats(sessionKey));
 });
 
 // --- Health ---

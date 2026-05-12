@@ -8,6 +8,7 @@ import { tools } from "./tools.js";
 import { publish } from "./sse.js";
 import { bridgeAndPublish } from "./event-bridge.js";
 import { loadContext, appendContext, type ContextMessage } from "./session.js";
+import { compactIfNeeded } from "./compaction.js";
 
 registerApiProvider({
   api: "openai-completions",
@@ -49,6 +50,7 @@ function getAgent(sessionKey: string): Agent {
       return undefined;
     },
     convertToLlm: (messages) => messages as any[],
+    transformContext: compactIfNeeded,
     toolExecution: "sequential",
   });
 

@@ -90,7 +90,6 @@ function doEdit(
       return {
         content: [{ type: "text", text: `edit failed: string not found in ${params.path}` }],
         details: "string not found",
-        isError: true,
       };
     }
     const after = content.replace(edit.old_string, edit.new_string);
@@ -133,8 +132,7 @@ function doBash(
         const isError = !!error;
         resolve_({
           content: [{ type: "text", text }],
-          details: { stdout, stderr, exitCode: error?.code ?? 0 },
-          ...(isError ? { isError: true } : {}),
+          details: text,
         });
       }
     );
@@ -154,27 +152,27 @@ export const tools: AgentTool<TSchema, string | Record<string, unknown>>[] = [
     description: "Read file contents or list directory contents",
     parameters: ReadParams,
     label: "Read",
-    execute: (_id, params) => Promise.resolve(doRead(params)),
+    execute: (_id, params) => Promise.resolve(doRead(params as Static<typeof ReadParams>)),
   },
   {
     name: "write",
     description: "Create or overwrite a file",
     parameters: WriteParams,
     label: "Write",
-    execute: (_id, params) => Promise.resolve(doWrite(params)),
+    execute: (_id, params) => Promise.resolve(doWrite(params as Static<typeof WriteParams>)),
   },
   {
     name: "edit",
     description: "Replace text in a file",
     parameters: EditParams,
     label: "Edit",
-    execute: (_id, params) => Promise.resolve(doEdit(params)),
+    execute: (_id, params) => Promise.resolve(doEdit(params as Static<typeof EditParams>)),
   },
   {
     name: "bash",
     description: "Execute a bash command",
     parameters: BashParams,
     label: "Bash",
-    execute: (_id, params, signal) => doBash(params, signal),
+    execute: (_id, params, signal) => doBash(params as Static<typeof BashParams>, signal),
   },
 ];

@@ -1,6 +1,6 @@
 import type { AgentEvent } from "@mariozechner/pi-agent-core";
+import crypto from "crypto";
 import { publish, type SseEvent } from "./sse.js";
-import { v4 as uuid } from "crypto";
 
 /** Translate Pi AgentEvent → H5 frontend SSE events and publish them. */
 export function bridgeAndPublish(
@@ -20,7 +20,13 @@ function sse(
   sessionKey: string,
   payload: Record<string, unknown> = {}
 ): SseEvent {
-  return { kind, runId, sessionKey, payload };
+  return {
+    eventId: `evt-${crypto.randomBytes(4).toString("hex")}-${Math.random().toString(36).slice(2, 8)}`,
+    kind,
+    runId,
+    sessionKey,
+    payload,
+  };
 }
 
 let accumulatedText = "";
@@ -44,10 +50,11 @@ function translate(
       }
       // tool call start
       if (sub.type === "toolcall_start") {
+        const subAny = sub as any;
         return [
           sse("tool_use", runId, sessionKey, {
-            name: sub.toolCall?.name,
-            input: sub.toolCall?.arguments,
+            name: subAny.toolName || subAny.partial?.toolCalls?.[0]?.name,
+            id: subAny.id || subAny.contentIndex,
           }),
         ];
       }

@@ -1,0 +1,38 @@
+{
+  "agents": [
+    {
+      "id": "main",
+      "name": "通用助手",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "fallbacks": ["deepseek/deepseek-v4-flash"],
+      "systemPrompt": "你是 Pilot Code，一个智能编程助手。你可以读写文件、执行命令来帮助用户。请用中文回答。修改文件前先读取，使用 edit 做精确修改。",
+      "timeoutSeconds": 600
+    },
+    {
+      "id": "dev",
+      "name": "开发助手",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "fallbacks": ["deepseek/deepseek-v4-flash"],
+      "systemPrompt": "你是一个专业的开发助手，专注于编写高质量代码。请用中文回答。遵循最佳实践，添加适当的错误处理和注释。",
+      "timeoutSeconds": 1200
+    }
+  ],
+  "models": {
+    "xiaomi/mimo-v2.5-pro": {
+      "provider": "xiaomi",
+      "api": "openai-completions",
+      "baseUrl": "https://token-plan-cn.xiaomimimo.com/v1",
+      "reasoning": true,
+      "contextWindow": 1000000,
+      "maxTokens": 131072
+    },
+    "deepseek/deepseek-v4-flash": {
+      "provider": "deepseek",
+      "api": "openai-completions",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "reasoning": false,
+      "contextWindow": 128000,
+      "maxTokens": 8192
+    }
+  }
+}

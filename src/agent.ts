@@ -4,17 +4,59 @@ import {
   registerApiProvider,
   type Model,
 } from "@mariozechner/pi-ai";
-import { tools } from "./tools.js";
+import fs from "fs";
+import path from "path";
+import { createUserTools, getUserWorkspaceDir } from "./tools.js";
 import { publish } from "./sse.js";
 import { bridgeAndPublish } from "./event-bridge.js";
 import { loadContext, appendContext, updateSessionTitle, type ContextMessage } from "./session.js";
 import { compactIfNeeded } from "./compaction.js";
+import { appendAuditLog } from "./audit.js";
 
 registerApiProvider({
   api: "openai-completions",
   stream: streamSimpleOpenAICompletions as any,
   streamSimple: streamSimpleOpenAICompletions as any,
 }, "xiaomi-openai");
+
+// --- Load agents.json config ---
+
+interface AgentConfig {
+  id: string;
+  name: string;
+  model: string;
+  fallbacks: string[];
+  systemPrompt: string;
+  timeoutSeconds: number;
+}
+
+interface AgentsConfig {
+  agents: AgentConfig[];
+  models: Record<string, {
+    provider: string;
+    api: string;
+    baseUrl: string;
+    reasoning: boolean;
+    contextWindow: number;
+    maxTokens: number;
+  }>;
+}
+
+let agentsConfig: AgentsConfig = { agents: [], models: {} };
+const configPath = path.join(import.meta.dirname, "..", "agents.json");
+if (fs.existsSync(configPath)) {
+  try {
+    agentsConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    console.log(`[config] loaded ${agentsConfig.agents?.length || 0} agent configs from agents.json`);
+  } catch (err) {
+    console.error("[config] failed to parse agents.json:", err);
+  }
+}
+
+const agentConfigs = new Map<string, AgentConfig>();
+for (const ac of agentsConfig.agents || []) {
+  agentConfigs.set(ac.id, ac);
+}
 
 const mimoModel: Model<any> = {
   id: "mimo-v2.5-pro",
@@ -29,24 +71,96 @@ const mimoModel: Model<any> = {
   maxTokens: 131072,
 };
 
-const SYSTEM_PROMPT =
+const deepseekModel: Model<any> = {
+  id: "deepseek-v4-flash",
+  name: "DeepSeek V4 Flash",
+  api: "openai-completions",
+  provider: "deepseek",
+  baseUrl: "https://api.deepseek.com/v1",
+  reasoning: false,
+  input: ["text"],
+  cost: { input: 0.1, output: 0.4, cacheRead: 0.01, cacheWrite: 0 },
+  contextWindow: 128000,
+  maxTokens: 8192,
+};
+
+const DEFAULT_SYSTEM_PROMPT =
   "你是 Pilot Code，一个智能编程助手。你可以读写文件、执行命令来帮助用户。请用中文回答。修改文件前先读取，使用 edit 做精确修改。";
 
-const agents = new Map<string, Agent>();
+// --- SessionLane: per-session serial queue ---
 
-function getAgent(sessionKey: string): Agent {
+class SessionLane {
+  private queue: Array<() => Promise<void>> = [];
+  private running = false;
+
+  enqueue<T>(task: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      this.queue.push(async () => {
+        try { resolve(await task()); }
+        catch (e) { reject(e); }
+      });
+      this.dequeue();
+    });
+  }
+
+  private async dequeue() {
+    if (this.running || this.queue.length === 0) return;
+    this.running = true;
+    const task = this.queue.shift()!;
+    await task();
+    this.running = false;
+    this.dequeue();
+  }
+}
+
+const lanes = new Map<string, SessionLane>();
+
+function getOrCreateLane(sessionKey: string): SessionLane {
+  let lane = lanes.get(sessionKey);
+  if (!lane) {
+    lane = new SessionLane();
+    lanes.set(sessionKey, lane);
+  }
+  return lane;
+}
+
+// --- Agent pool ---
+
+interface AgentEntry {
+  agent: Agent;
+  modelId: string;
+  agentId: string;
+  userId: number;
+  lastActivityAt: number;
+}
+
+const agents = new Map<string, AgentEntry>();
+
+function getAgent(sessionKey: string, userId: number, modelId?: string, agentId?: string): Agent {
   const existing = agents.get(sessionKey);
-  if (existing) return existing;
+  if (existing) {
+    existing.lastActivityAt = Date.now();
+    return existing.agent;
+  }
+
+  const ac = agentConfigs.get(agentId || "main");
+  const resolvedModelId = modelId || ac?.model || "xiaomi/mimo-v2.5-pro";
+  const systemPrompt = ac?.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+  const model = resolveModel(resolvedModelId);
+  if (!model) throw new Error(`Unknown model: ${resolvedModelId}`);
+
+  const userTools = createUserTools(getUserWorkspaceDir(userId));
 
   const agent = new Agent({
     initialState: {
-      systemPrompt: SYSTEM_PROMPT,
-      model: mimoModel,
-      tools,
+      systemPrompt,
+      model,
+      tools: userTools,
     },
     streamFn: streamSimpleOpenAICompletions as any,
     getApiKey: (provider: string) => {
       if (provider === "xiaomi") return process.env.XIAOMI_API_KEY;
+      if (provider === "deepseek") return process.env.DEEPSEEK_API_KEY;
       return undefined;
     },
     convertToLlm: (messages) => messages as any[],
@@ -54,50 +168,106 @@ function getAgent(sessionKey: string): Agent {
     toolExecution: "sequential",
   });
 
+  const history = loadContext(sessionKey);
+  if (history.length > 0) {
+    const MAX_HISTORY = 20;
+    const MAX_MSG_LEN = 500;
+    const recent = history.slice(-MAX_HISTORY);
+    const lines = recent.map((m) => {
+      const label = m.role === "user" ? "User" : "Assistant";
+      const text = (m.content || "").slice(0, MAX_MSG_LEN);
+      return `${label}: ${text}`;
+    });
+    const contextMsg = {
+      role: "user" as const,
+      content: `[以下是之前对话的摘要，共${history.length}条，请在此基础上继续对话]\n${lines.join("\n")}`,
+      timestamp: Date.now(),
+    };
+    agent.state.messages = [contextMsg];
+    console.log(`[agent] restored ${history.length} messages as context summary for session ${sessionKey}`);
+  }
+
   agent.subscribe((event) => {
     const runId = currentRunIds.get(sessionKey);
     if (runId) bridgeAndPublish(event, runId, sessionKey);
   });
 
-  agents.set(sessionKey, agent);
+  agents.set(sessionKey, { agent, modelId: resolvedModelId, agentId: agentId || "main", userId, lastActivityAt: Date.now() });
   return agent;
+}
+
+function resolveModel(modelId: string): Model<any> | null {
+  if (modelId === "xiaomi/mimo-v2.5-pro" || modelId === "mimo-v2.5-pro") return mimoModel;
+  if (modelId === "deepseek/deepseek-v4-flash" || modelId === "deepseek-v4-flash") return deepseekModel;
+  return null;
 }
 
 const currentRunIds = new Map<string, string>();
 
-export async function runPrompt(message: string, sessionKey: string): Promise<string> {
-  const agent = getAgent(sessionKey);
+async function doRunPrompt(message: string, sessionKey: string, userId: number, agentId?: string): Promise<string> {
+  const entry = agents.get(sessionKey);
+  const modelId = entry?.modelId || "xiaomi/mimo-v2.5-pro";
+  const agent = getAgent(sessionKey, userId, modelId, agentId);
   const runId = crypto.randomUUID();
   currentRunIds.set(sessionKey, runId);
+  const startTime = Date.now();
+  let errorMsg = "";
 
+  let fellback = false;
   try {
     await agent.prompt(message);
   } catch (err: any) {
-    publish(sessionKey, {
-      eventId: "",
-      kind: "run.error",
-      runId,
-      sessionKey,
-      payload: { error: err.message || "Agent error" },
-    });
+    const errMsg = err?.message || "";
+    const isApiError = /rate.limit|429|5\d{2}|timeout|ECONNRESET|ETIMEDOUT/i.test(errMsg);
+  const ac = agentConfigs.get(agents.get(sessionKey)?.agentId || "main");
+  const fallbackModelId = ac?.fallbacks?.[0] || "deepseek/deepseek-v4-flash";
+  if (isApiError && modelId !== fallbackModelId) {
+    console.warn(`[agent] primary model failed (${errMsg.slice(0, 100)}), falling back to ${fallbackModelId}`);
+    agents.delete(sessionKey);
+    const fallbackAgent = getAgent(sessionKey, userId, fallbackModelId);
+      try {
+        await fallbackAgent.prompt(message);
+        fellback = true;
+      } catch (fbErr: any) {
+        publish(sessionKey, {
+          eventId: "",
+          kind: "run.error",
+          runId,
+          sessionKey,
+          payload: { error: `主模型和降级模型均失败: ${fbErr.message}` },
+        });
+        errorMsg = `主模型和降级模型均失败: ${fbErr.message}`;
+      }
+    } else {
+      publish(sessionKey, {
+        eventId: "",
+        kind: "run.error",
+        runId,
+        sessionKey,
+        payload: { error: errMsg || "Agent error" },
+      });
+      errorMsg = errMsg || "Agent error";
+    }
   } finally {
     currentRunIds.delete(sessionKey);
+    const e = agents.get(sessionKey);
+    if (e) e.lastActivityAt = Date.now();
   }
 
-  // Persist user + assistant messages
-  const lastAssistant = agent.state.messages
+  const activeAgent = agents.get(sessionKey)?.agent || agent;
+  const lastAssistant = activeAgent.state.messages
     ?.filter((m: any) => m.role === "assistant")
     .pop();
   const toSave: ContextMessage[] = [{ role: "user", content: message }];
+  const modelName = fellback ? deepseekModel.name : mimoModel.name;
   if (lastAssistant) {
     const text = typeof lastAssistant.content === "string"
       ? lastAssistant.content
       : (lastAssistant.content as any[])?.filter((b: any) => b.type === "text").map((b: any) => b.text).join("") || "";
-    if (text) toSave.push({ role: "assistant", content: text, model: mimoModel.name });
+    if (text) toSave.push({ role: "assistant", content: text, model: modelName });
   }
   appendContext(sessionKey, toSave);
 
-  // Auto-generate session title from first assistant response
   if (toSave.length > 1 && toSave[1]?.role === "assistant") {
     const firstUserMsg = loadContext(sessionKey).find((m) => m.role === "user");
     if (firstUserMsg && firstUserMsg === toSave[0]) {
@@ -106,13 +276,28 @@ export async function runPrompt(message: string, sessionKey: string): Promise<st
     }
   }
 
+  appendAuditLog({
+    timestamp: Date.now(),
+    userId,
+    username: "",
+    sessionKey,
+    model: fellback ? (agentConfigs.get(agentId || "main")?.fallbacks?.[0] || "deepseek/deepseek-v4-flash") : modelId,
+    durationMs: Date.now() - startTime,
+    error: errorMsg || undefined,
+  });
+
   return runId;
 }
 
+export function runPrompt(message: string, sessionKey: string, userId: number, agentId?: string): Promise<string> {
+  const lane = getOrCreateLane(sessionKey);
+  return lane.enqueue(() => doRunPrompt(message, sessionKey, userId, agentId));
+}
+
 export function abort(sessionKey: string): void {
-  const agent = agents.get(sessionKey);
-  if (!agent) return;
-  agent.abort();
+  const entry = agents.get(sessionKey);
+  if (!entry) return;
+  entry.agent.abort();
   const runId = currentRunIds.get(sessionKey);
   if (runId) {
     publish(sessionKey, {
@@ -125,10 +310,10 @@ export function abort(sessionKey: string): void {
   currentRunIds.delete(sessionKey);
 }
 
-/** Remove agent from memory (e.g. when session is deleted) */
 export function destroyAgent(sessionKey: string): void {
   agents.delete(sessionKey);
   currentRunIds.delete(sessionKey);
+  lanes.delete(sessionKey);
 }
 
 // --- Model switching ---
@@ -146,8 +331,29 @@ export function getModelList() {
   }));
 }
 
-export function switchModel(sessionKey: string, modelId: string): boolean {
+export function switchModel(sessionKey: string, modelId: string, userId: number): boolean {
   if (!modelRegistry[modelId]) return false;
-  // MVP: only mimo is actually supported; accept any registered model
+
+  const model = resolveModel(modelId);
+  if (!model) return false;
+
+  agents.delete(sessionKey);
+  getAgent(sessionKey, userId, modelId);
+  console.log(`[agent] switched session ${sessionKey} to model ${modelId}`);
   return true;
 }
+
+// --- Session lifecycle: evict idle agents ---
+
+const IDLE_TIMEOUT_MS = (parseInt(process.env.SESSION_IDLE_TIMEOUT || "86400", 10)) * 1000;
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [sk, entry] of agents) {
+    if (now - entry.lastActivityAt > IDLE_TIMEOUT_MS) {
+      console.log(`[lifecycle] evicting idle agent for session ${sk} (idle ${Math.round((now - entry.lastActivityAt) / 60000)}min)`);
+      agents.delete(sk);
+      lanes.delete(sk);
+    }
+  }
+}, 5 * 60 * 1000);

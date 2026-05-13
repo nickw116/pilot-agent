@@ -3,11 +3,13 @@ import express from "express";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
+import multer from "multer";
 import { registerSubscriber, unregisterSubscriber, publish } from "./sse.js";
 import * as agentModule from "./agent.js";
 import * as authMod from "./auth.js";
 import * as sessionMod from "./session.js";
 import { getContextStats } from "./compaction.js";
+import { checkRateLimit } from "./rate-limit.js";
 
 const PORT = parseInt(process.env.PORT || "8081", 10);
 
@@ -126,6 +128,9 @@ app.delete("/api/sessions", auth, (req, res) => {
 
 app.post("/api/chat/v2", auth, (req, res) => {
   const user = (req as any).user;
+  if (!checkRateLimit(user.userId)) {
+    return res.status(429).json({ detail: "请求过于频繁，请稍后再试" });
+  }
   const { message, session_key } = req.body || {};
   if (!message) return res.status(400).json({ detail: "No message" });
 
@@ -134,9 +139,10 @@ app.post("/api/chat/v2", auth, (req, res) => {
     ? sessionMod.switchSession(user.userId, session_key)
     : sessionMod.getOrCreateActiveSession(user.userId, user.username);
   const sk = s?.session_key || sessionMod.getOrCreateActiveSession(user.userId, user.username).session_key;
+  const agentId = s?.agent_id || "main";
 
   // Fire-and-forget
-  agentModule.runPrompt(message, sk).catch((err) => {
+  agentModule.runPrompt(message, sk, user.userId, agentId).catch((err) => {
     console.error("[chat/v2] agent error:", err.message);
   });
 
@@ -213,42 +219,71 @@ app.get("/api/models", auth, (_req, res) => {
 });
 
 app.post("/api/model/switch", auth, (req, res) => {
+  const user = (req as any).user;
   const { model, session_key } = req.body || {};
   if (!model || !session_key) {
     return res.status(400).json({ detail: "Missing model or session_key" });
   }
-  const ok = agentModule.switchModel(session_key, model);
+  const ok = agentModule.switchModel(session_key, model, user.userId);
   if (!ok) return res.status(400).json({ detail: "Unknown model" });
   res.json({ ok: true, model });
 });
 
 // --- File transfer ---
 
-const WORKSPACE = path.resolve(process.env.WORKSPACE_DIR || path.join(import.meta.dirname, "..", "data", "workspace"));
-const UPLOAD_DIR = path.join(WORKSPACE, "uploads");
+const WORKSPACE_ROOT = path.resolve(process.env.WORKSPACE_DIR || path.join(import.meta.dirname, "..", "data", "workspace"));
 
-app.post("/api/upload", auth, (req, res) => {
-  // Simple base64 upload for MVP
-  const { filename, content_b64 } = req.body || {};
-  if (!filename || !content_b64) {
-    return res.status(400).json({ detail: "Missing filename or content_b64" });
+function userWorkspace(userId: number): string {
+  const dir = path.join(WORKSPACE_ROOT, `user-${userId}`);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function userUploadDir(userId: number): string {
+  const dir = path.join(userWorkspace(userId), "uploads");
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (req, _file, cb) => {
+      const user = (req as any).user;
+      cb(null, userUploadDir(user.userId));
+    },
+    filename: (_req, file, cb) => {
+      const safeName = path.basename(file.originalname || "upload");
+      const ts = Date.now().toString(36);
+      cb(null, `${ts}_${safeName}`);
+    },
+  }),
+  limits: { fileSize: 50 * 1024 * 1024 },
+});
+
+app.post("/api/upload", auth, upload.single("file"), (req, res) => {
+  const file = req.file as Express.Multer.File | undefined;
+  const user = (req as any).user;
+  if (!file) {
+    return res.status(400).json({ detail: "No file provided" });
   }
-  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-  const safeName = path.basename(filename);
-  const filePath = path.join(UPLOAD_DIR, safeName);
-  fs.writeFileSync(filePath, Buffer.from(content_b64, "base64"));
-  const relativePath = path.relative(WORKSPACE, filePath);
-  res.json({ url: `/api/download?path=${encodeURIComponent(relativePath)}`, filename: safeName });
+  const ws = userWorkspace(user.userId);
+  const relativePath = path.relative(ws, file.path);
+  res.json({
+    url: `/api/download?path=${encodeURIComponent(relativePath)}`,
+    filename: file.originalname,
+  });
 });
 
 app.get("/api/download", auth, (req, res) => {
   const filePath = req.query.path as string;
   const url = req.query.url as string;
   const filename = (req.query.filename as string) || "download";
+  const user = (req as any).user;
 
   if (filePath) {
-    const resolved = path.resolve(WORKSPACE, filePath);
-    if (!resolved.startsWith(WORKSPACE)) {
+    const ws = userWorkspace(user.userId);
+    const resolved = path.resolve(ws, filePath);
+    if (!resolved.startsWith(ws)) {
       return res.status(403).json({ detail: "Path escapes workspace" });
     }
     if (!fs.existsSync(resolved)) return res.status(404).json({ detail: "Not found" });

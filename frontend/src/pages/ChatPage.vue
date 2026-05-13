@@ -8,7 +8,7 @@
       </template>
       <template #title>
         <div class="nav-title-wrap">
-          <span class="nav-title">AI SPACE</span>
+          <span class="nav-title">PILOT CODE</span>
           <div class="nav-sub-row">
             <button
               v-if="props.currentModel"

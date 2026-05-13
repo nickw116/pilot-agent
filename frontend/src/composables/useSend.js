@@ -192,7 +192,7 @@ export function useSend(ctx, streamingApi) {
 
       const data = await resp.json()
       uploadProgress.value = 100
-      return data.url
+      return data
     } catch (err) {
       console.error('[useChat] upload failed:', err)
       throw err
@@ -204,8 +204,8 @@ export function useSend(ctx, streamingApi) {
 
   /* --- Attachments --- */
 
-  function addAttachment(url, name, type) {
-    attachments.value.push({ url, name, type })
+  function addAttachment(url, name, type, meta = {}) {
+    attachments.value.push({ url, name, type, ...meta })
   }
 
   function removeAttachment(index) {
@@ -393,13 +393,24 @@ export function useSend(ctx, streamingApi) {
       }
 
       let fullMessage = ''
+      const sendImages = []
       if (hasAttachments) {
         const parts = attachments.value.map(a => {
-          const label = a.type.startsWith('image/') ? `图片: ${a.name}` : `文件: ${a.name}`
-          return `📎 [${label}]\n${a.url}`
+          if (a.textContent) {
+            return `[文件: ${a.name}]\n\`\`\`\n${a.textContent}\n\`\`\``
+          }
+          if (a.preview) {
+            const dataUrl = a.preview
+            const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/)
+            if (match) {
+              sendImages.push({ data: match[2], mimeType: match[1] })
+            }
+            return `[图片: ${a.name}]`
+          }
+          return `[文件: ${a.name}] (${a.type || 'unknown'}, ${(a.size ? formatFileSize(a.size) : 'size unknown')})`
         })
-        fullMessage = parts.join('\n')
-        if (text) fullMessage += '\n' + text
+        fullMessage = parts.join('\n\n')
+        if (text) fullMessage += '\n\n' + text
       } else {
         fullMessage = text
       }
@@ -427,6 +438,7 @@ export function useSend(ctx, streamingApi) {
             body: JSON.stringify({
               message: fullMessage,
               session_key: ctx.sessionKey.value,
+              images: sendImages.length > 0 ? sendImages : undefined,
             }),
           })
           if (!resp.ok) {

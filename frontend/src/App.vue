@@ -42,6 +42,7 @@
       v-model:show="showSessions"
       :token="token"
       :current-session-key="sessionKey"
+      :current-agent-id="currentAgentId"
       @switch="handleSwitchSession"
       @new="handleNewSession"
     />
@@ -50,9 +51,12 @@
       v-model:show="showSettings"
       :current-user="currentUser"
       :session-key="sessionKey"
+      :agents="agents"
+      :current-agent-id="currentAgentId"
       @clear-chat="handleClearChat"
       @logout="handleLogout"
       @change-password="handleChangePassword"
+      @switch-agent="handleSwitchAgent"
     />
   </div>
 </template>
@@ -67,7 +71,7 @@ import { useEventStream } from './composables/useEventStream.js'
 import { useServiceStatus } from './composables/useServiceStatus.js'
 import SessionList from './components/SessionList.vue'
 import SettingsPopup from './components/SettingsPopup.vue'
-import { API_BASE, API_SESSION, API_SESSIONS, API_SESSION_NEW, API_MODEL_SWITCH } from './constants/index.js'
+import { API_BASE, API_SESSION, API_SESSIONS, API_SESSION_NEW, API_MODEL_SWITCH, API_AGENTS } from './constants/index.js'
 
 const router = useRouter()
 
@@ -146,6 +150,8 @@ const showSettings = ref(false)
 const showSessions = ref(false)
 const currentModel = ref('')
 const models = ref([])
+const agents = ref([])
+const currentAgentId = ref('main')
 const { serviceStatus } = useServiceStatus()
 let modelPollTimer = null
 const MODEL_POLL_INTERVAL = 30000
@@ -212,9 +218,9 @@ onMounted(async () => {
       console.warn('[App] loadHistory timed out:', e.message)
     }
     fetchModel()
+    fetchAgents()
     eventStream.connect()
   } else if (router.currentRoute.value.name !== 'Login') {
-    // 启动时无有效 token → 跳转登录页
     router.replace({ name: 'Login' })
   }
   document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -232,6 +238,7 @@ watch([loading, sessionKey, loggedIn], ([isLoading, activeSession, isLoggedIn]) 
   } else {
     stopModelPolling()
   }
+  if (activeSession) updateCurrentAgentId()
 })
 
 watch(
@@ -266,12 +273,16 @@ watch(() => eventStream.connected.value, (isConnected, wasConnected) => {
   if (isConnected) {
     setStreamMode('events')
     console.debug('[App] switched to persistent SSE mode (v2)')
+    if (loading.value && !eventStream.lastDataAt.value) {
+      console.warn('[App] SSE reconnected but loading was stuck — resetting')
+      loading.value = false
+    }
   } else {
     setStreamMode('legacy')
     console.debug('[App] switched to legacy SSE mode')
-    // Diagnostic: if we lost connection while a generation is in progress, log it
     if (wasConnected === true && loading.value) {
-      console.warn('[App] event stream disconnected while loading=true')
+      console.warn('[App] event stream disconnected while loading=true — resetting')
+      loading.value = false
     }
   }
 })
@@ -290,6 +301,7 @@ async function handleLogin() {
       console.warn('[App] loadHistory timed out:', e.message)
     }
     fetchModel()
+    fetchAgents()
     eventStream.connect()
     router.push({ name: 'Chat' })
   }
@@ -315,7 +327,7 @@ async function fetchModel(options = {}) {
       } else {
         console.warn('[App] models list empty, raw response:', data)
       }
-      const defaultModel = data.default || data.current_model || ''
+      const defaultModel = data.default || data.current_model || (modelList.length ? (modelList[0].id || modelList[0].model || modelList[0].name) : '')
       if (defaultModel) {
         return setCurrentModel(defaultModel, {
           source: options.source || 'api',
@@ -415,10 +427,78 @@ async function handleSwitchModel(model) {
   }
 }
 
-async function handleUpload(file) {
+async function fetchAgents() {
   try {
-    const url = await uploadFile(file)
-    addAttachment(url, file.name, file.type || 'application/octet-stream')
+    const r = await fetch(`${API_BASE}${API_AGENTS}`, {
+      headers: { Authorization: `Bearer ${token.value}` },
+    })
+    if (r.ok) {
+      const data = await r.json()
+      agents.value = data.agents || []
+      updateCurrentAgentId()
+    }
+  } catch (err) {
+    console.error('[App] fetch agents failed:', err)
+  }
+}
+
+function updateCurrentAgentId() {
+  const sk = sessionKey.value
+  let parsed = 'main'
+  if (sk && sk.startsWith('agent:')) {
+    const parts = sk.split(':')
+    if (parts.length >= 2) {
+      parsed = parts[1]
+    }
+  }
+  const allowed = agents.value.map(a => a.id)
+  if (allowed.length > 0 && !allowed.includes(parsed)) {
+    parsed = allowed[0]
+  }
+  currentAgentId.value = parsed
+}
+
+async function handleSwitchAgent(agentId) {
+  if (loading.value) {
+    showNotify({ type: 'warning', message: '请等待当前回复完成' })
+    return
+  }
+  try {
+    const r = await fetch(`${API_BASE}${API_SESSIONS}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token.value}`,
+      },
+      body: JSON.stringify({ agent_id: agentId }),
+    })
+    if (r.ok) {
+      const data = await r.json()
+      sessionKey.value = data.sessionKey
+      currentAgentId.value = agentId
+      messages.value = []
+      currentModel.value = ''
+      await fetchModel()
+      showNotify({ type: 'success', message: `已切换到 ${(agents.value.find(a => a.id === agentId))?.name || agentId}` })
+      showSettings.value = false
+    } else {
+      const text = await r.text()
+      showNotify({ type: 'danger', message: `切换失败: ${text}` })
+    }
+  } catch (err) {
+    console.error('[App] switch agent failed:', err)
+    showNotify({ type: 'danger', message: '切换助手失败，请重试' })
+  }
+}
+
+  async function handleUpload(file) {
+  try {
+    const data = await uploadFile(file)
+    const meta = {}
+    if (data.textContent) meta.textContent = data.textContent
+    if (data.preview) meta.preview = data.preview
+    if (data.size) meta.size = data.size
+    addAttachment(data.url, data.filename || file.name, file.type || data.mimetype || 'application/octet-stream', meta)
   } catch (err) {
     messages.value.push({
       id: Date.now(),
@@ -515,7 +595,11 @@ async function handleNewSession() {
   try {
     const r = await fetch(`${API_BASE}${API_SESSIONS}`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token.value}` },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token.value}`,
+      },
+      body: JSON.stringify({ agent_id: currentAgentId.value }),
     })
     if (r.ok) {
       const data = await r.json()

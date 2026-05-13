@@ -9,7 +9,7 @@
         <div class="bot-mouth"></div>
         <div class="bot-antenna"></div>
       </div>
-      <h2>AI SPACE</h2>
+      <h2>PILOT CODE</h2>
       <van-cell-group inset class="login-fields">
         <van-field :model-value="username" @update:model-value="$emit('update:username', $event)" label="用户名" placeholder="用户名" />
         <van-field :model-value="password" @update:model-value="$emit('update:password', $event)" label="密码" type="password" placeholder="密码" />
@@ -35,26 +35,24 @@ defineEmits(['update:username', 'update:password', 'login'])
 .login-page {
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #7C3AED 0%, #4F46E5 100%);
+  background: linear-gradient(160deg, #E8F0FE 0%, #F8FAFF 40%, #FFFFFF 100%);
   padding: 20px;
 }
 .login-box {
-  background: rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: #FFFFFF;
+  border: 1px solid #E5E5E5;
   border-radius: 24px;
   padding: 40px 28px;
   width: 100%;
   max-width: 380px;
-  box-shadow: 0 20px 60px rgba(124, 58, 237, 0.3);
+  box-shadow: 0 8px 30px rgba(0, 122, 255, 0.08);
   animation: fadeInUp 0.5s ease;
 }
 .login-box h2 {
   font-family: 'Space Grotesk', sans-serif;
   text-align: center;
   margin-bottom: 28px;
-  color: var(--white);
+  color: #1F1F1F;
   font-size: 24px;
   font-weight: 600;
   letter-spacing: -0.5px;
@@ -70,8 +68,9 @@ defineEmits(['update:username', 'update:password', 'login'])
 .bot-head {
   width: 48px;
   height: 40px;
-  background: rgba(255,255,255,0.95);
+  background: #F0F5FF;
   border-radius: 12px;
+  border: 1px solid #E0EAFF;
   position: absolute;
   left: 8px;
   top: 14px;
@@ -79,7 +78,7 @@ defineEmits(['update:username', 'update:password', 'login'])
 .bot-eye {
   width: 8px;
   height: 8px;
-  background: var(--primary);
+  background: #007AFF;
   border-radius: 50%;
   position: absolute;
   top: 28px;
@@ -89,7 +88,7 @@ defineEmits(['update:username', 'update:password', 'login'])
 .bot-mouth {
   width: 20px;
   height: 6px;
-  border-bottom: 3px solid var(--primary);
+  border-bottom: 3px solid #007AFF;
   border-radius: 0 0 10px 10px;
   position: absolute;
   bottom: 18px;
@@ -99,7 +98,7 @@ defineEmits(['update:username', 'update:password', 'login'])
 .bot-antenna {
   width: 4px;
   height: 12px;
-  background: rgba(255,255,255,0.9);
+  background: #D0DFFF;
   position: absolute;
   top: 2px;
   left: 50%;
@@ -110,12 +109,12 @@ defineEmits(['update:username', 'update:password', 'login'])
   content: '';
   width: 10px;
   height: 10px;
-  background: var(--accent);
+  background: #007AFF;
   border-radius: 50%;
   position: absolute;
   top: -6px;
   left: -3px;
-  box-shadow: 0 0 10px var(--accent);
+  box-shadow: 0 0 10px rgba(0, 122, 255, 0.4);
 }
 
 .login-fields { margin-top: 0; }
@@ -130,14 +129,14 @@ defineEmits(['update:username', 'update:password', 'login'])
 .login-btn.van-button {
   margin-top: 28px;
   border-radius: 14px;
-  background: linear-gradient(135deg, #a78bfa 0%, #818cf8 100%);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  box-shadow: 0 4px 16px rgba(124, 58, 237, 0.4);
+  background: #007AFF;
+  border: none;
+  box-shadow: 0 4px 16px rgba(0, 122, 255, 0.25);
   transition: all 0.25s ease;
 }
 .login-btn.van-button:hover {
-  background: linear-gradient(135deg, #c4b5fd 0%, #a5b4fc 100%);
-  box-shadow: 0 6px 24px rgba(124, 58, 237, 0.55);
+  background: #3395FF;
+  box-shadow: 0 6px 24px rgba(0, 122, 255, 0.35);
   transform: translateY(-1px);
 }
 .login-btn:active { transform: scale(0.97) translateY(0); }

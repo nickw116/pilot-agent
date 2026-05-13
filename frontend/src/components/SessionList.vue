@@ -19,7 +19,7 @@
       <div class="session-list">
         <div
           v-for="s in sessions"
-          :key="s.session_key"
+          :key="s.sessionKey"
           :class="['session-item', { active: s.active }]"
           @click="handleSwitch(s)"
         >
@@ -65,6 +65,7 @@ const props = defineProps({
   show: { type: Boolean, default: false },
   token: { type: String, default: '' },
   currentSessionKey: { type: String, default: '' },
+  currentAgentId: { type: String, default: 'main' },
 })
 
 const emit = defineEmits(['update:show', 'switch', 'new', 'delete'])
@@ -77,15 +78,17 @@ const visible = computed({
 const sessions = ref([])
 const loading = ref(false)
 
-// Refresh session list when drawer opens
-watch(() => props.show, (v) => {
+// Refresh session list when drawer opens or agent changes
+watch([() => props.show, () => props.currentAgentId], ([v]) => {
   if (v) loadSessions()
 })
 
 async function loadSessions() {
   loading.value = true
   try {
-    const r = await fetch(`${API_BASE}${API_SESSIONS}`, {
+    const params = new URLSearchParams()
+    if (props.currentAgentId) params.set('agent_id', props.currentAgentId)
+    const r = await fetch(`${API_BASE}${API_SESSIONS}?${params}`, {
       headers: { Authorization: `Bearer ${props.token}` },
     })
     if (r.ok) {
@@ -101,14 +104,12 @@ async function loadSessions() {
 
 function handleSwitch(s) {
   if (s.active) {
-    // Already active, just close drawer
     visible.value = false
     return
   }
-  emit('switch', s.session_key)
-  // Update local active state immediately
+  emit('switch', s.sessionKey)
   sessions.value.forEach(item => { item.active = false })
-  const target = sessions.value.find(item => item.session_key === s.session_key)
+  const target = sessions.value.find(item => item.sessionKey === s.sessionKey)
   if (target) target.active = true
   visible.value = false
 }
@@ -131,13 +132,13 @@ async function handleDelete(s) {
     return // Cancelled
   }
   try {
-    const r = await fetch(`${API_BASE}${API_SESSIONS}?sessionKey=${encodeURIComponent(s.session_key)}`, {
+    const r = await fetch(`${API_BASE}${API_SESSIONS}?sessionKey=${encodeURIComponent(s.sessionKey)}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${props.token}` },
     })
     if (r.ok) {
-      sessions.value = sessions.value.filter(x => x.session_key !== s.session_key)
-      emit('delete', s.session_key)
+      sessions.value = sessions.value.filter(x => x.sessionKey !== s.sessionKey)
+      emit('delete', s.sessionKey)
     }
   } catch (err) {
     console.error('[SessionList] delete failed:', err)
@@ -145,21 +146,19 @@ async function handleDelete(s) {
 }
 
 function formatTitle(s) {
-  // Extract a readable name from session key
-  // Format: agent:{agent}:h5-{username}-{YYYYMMDD}-{HHMMSS}
-  const parts = s.session_key.split('-')
-  if (parts.length >= 3) {
-    const datePart = parts[parts.length - 2]  // YYYYMMDD
-    const timePart = parts[parts.length - 1]  // HHMMSS
-    if (/^\d{8}$/.test(datePart) && /^\d{6}$/.test(timePart)) {
-      const month = String(Number(datePart.slice(4, 6)))
-      const day = String(Number(datePart.slice(6, 8)))
-      const hour = timePart.slice(0, 2)
-      const min = timePart.slice(2, 4)
-      return `会话 ${month}月${day}日 ${hour}:${min}`
-    }
+  const key = s.sessionKey || ''
+  // sessionKey format: agent:<agentId>:h5-<user>-<YYYYMMDD>-<suffix>
+  const colonParts = key.split(':')
+  const agentId = colonParts.length >= 2 ? colonParts[1] : ''
+  const dashParts = key.split('-')
+  const datePart = dashParts.length >= 2 ? dashParts[dashParts.length - 2] : ''
+  if (agentId && /^\d{8}$/.test(datePart)) {
+    const yyyy = datePart.slice(0, 4)
+    const mm = datePart.slice(4, 6)
+    const dd = datePart.slice(6, 8)
+    return `${agentId}会话 - ${yyyy}/${mm}/${dd}`
   }
-  return s.session_key.slice(0, 30)
+  return key.slice(0, 30)
 }
 </script>
 

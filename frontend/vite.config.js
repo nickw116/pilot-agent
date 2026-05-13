@@ -26,7 +26,7 @@ export default defineConfig(() => {
         ],
       },
     },
-    base: '/',
+    base: '/pilotCode/',
     build: {
       rollupOptions: {
         output: {

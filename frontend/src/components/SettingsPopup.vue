@@ -13,6 +13,24 @@
             </template>
           </van-cell>
         </van-cell-group>
+
+        <!-- Agent 切换 -->
+        <div v-if="agents.length > 1" class="agent-section">
+          <div class="agent-label">助手类型</div>
+          <div class="agent-grid">
+            <div
+              v-for="agent in agents"
+              :key="agent.id"
+              class="agent-card"
+              :class="{ active: currentAgentId === agent.id }"
+              @click="handleSelectAgent(agent.id)"
+            >
+              <div class="agent-name">{{ agent.name }}</div>
+              <div class="agent-id">{{ agent.id }}</div>
+            </div>
+          </div>
+        </div>
+
         <van-button block class="settings-btn settings-btn-outline" @click="showChangePassword = true">
           修改密码
         </van-button>
@@ -77,9 +95,11 @@ const props = defineProps({
   show: { type: Boolean, default: false },
   currentUser: { type: Object, default: null },
   sessionKey: { type: String, default: '' },
+  agents: { type: Array, default: () => [] },
+  currentAgentId: { type: String, default: 'main' },
 })
 
-const emit = defineEmits(['update:show', 'clear-chat', 'logout', 'change-password'])
+const emit = defineEmits(['update:show', 'clear-chat', 'logout', 'change-password', 'switch-agent'])
 
 const visible = computed({
   get: () => props.show,
@@ -97,6 +117,11 @@ function handleClearChat() {
 
 function handleLogout() {
   emit('logout')
+}
+
+function handleSelectAgent(agentId) {
+  if (agentId === props.currentAgentId) return
+  emit('switch-agent', agentId)
 }
 
 // ── 修改密码 ──
@@ -127,7 +152,6 @@ async function handleChangePassword() {
   emit('change-password', oldPassword.value, newPassword.value, (result) => {
     pwLoading.value = false
     if (result.ok) {
-      // 成功 → 显示提示，关闭 popup，父组件会 logout
       showDialog({ title: '成功', message: '密码已修改，请重新登录' })
       emit('update:show', false)
     } else {
@@ -185,6 +209,51 @@ async function handleChangePassword() {
   color: var(--primary);
 }
 .settings-btn:active { transform: scale(0.98); }
+
+/* ── Agent Section ── */
+.agent-section {
+  margin-top: 16px;
+  padding: 0 4px;
+}
+.agent-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+.agent-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.agent-card {
+  background: var(--white);
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 8px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.agent-card:active { transform: scale(0.96); }
+.agent-card.active {
+  border-color: var(--accent);
+  background: rgba(0, 122, 255, 0.06);
+  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.15);
+}
+.agent-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.agent-card.active .agent-name {
+  color: var(--accent);
+}
+.agent-id {
+  font-size: 11px;
+  color: var(--secondary);
+  margin-top: 4px;
+}
 
 /* ── Change Password Form ── */
 .change-password-form {

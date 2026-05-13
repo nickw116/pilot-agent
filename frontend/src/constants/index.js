@@ -1,4 +1,4 @@
-export const API_BASE = '/api'
+export const API_BASE = '/pilotCode/api'
 export const TOKEN_KEY = 'pilot-code-token'
 
 // Filtered message content (skip these in history)
@@ -24,6 +24,7 @@ export const API_SESSION_NEW = '/session/new'
 export const API_CHANGE_PASSWORD = '/change-password'
 export const API_MODELS = '/models'
 export const API_MODEL_SWITCH = '/model/switch'
+export const API_AGENTS = '/agents'
 
 // Session
 export const SESSION_PREFIX = 'agent:main:h5'

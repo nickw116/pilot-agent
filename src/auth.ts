@@ -10,7 +10,24 @@ function getDb(): Database.Database {
   if (db) return db;
   db = new Database(DB_PATH, { readonly: false });
   db.pragma("journal_mode = WAL");
+  ensureUserColumns(db);
   return db;
+}
+
+function ensureUserColumns(d: Database.Database) {
+  const cols = (d.pragma("table_info(users)") as { name: string }[]).map(c => c.name);
+  if (!cols.includes("allowed_agent")) {
+    d.exec("ALTER TABLE users ADD COLUMN allowed_agent TEXT DEFAULT 'main'");
+  }
+}
+
+const AGENT_HIERARCHY = ["main", "dev", "user"];
+
+export function getAllowedAgents(allowedAgent: string | null): string[] {
+  const top = allowedAgent || "user";
+  const idx = AGENT_HIERARCHY.indexOf(top);
+  if (idx < 0) return ["user"];
+  return AGENT_HIERARCHY.slice(idx);
 }
 
 export interface User {
@@ -20,6 +37,7 @@ export interface User {
   role: string;
   display_name: string;
   enabled: number;
+  allowed_agent: string | null;
 }
 
 function hashPassword(password: string): string {
@@ -29,7 +47,7 @@ function hashPassword(password: string): string {
 export function login(
   username: string,
   password: string
-): { token: string; username: string; role: string; display_name: string } | null {
+): { token: string; username: string; role: string; display_name: string; allowed_agent: string } | null {
   const d = getDb();
   const user = d
     .prepare("SELECT * FROM users WHERE username = ? AND enabled = 1")
@@ -49,6 +67,7 @@ export function login(
     username: user.username,
     role: user.role,
     display_name: user.display_name,
+    allowed_agent: user.allowed_agent || "user",
   };
 }
 
@@ -57,13 +76,14 @@ export interface TokenUser {
   username: string;
   role: string;
   displayName: string;
+  allowedAgent: string;
 }
 
 export function validateToken(token: string): TokenUser | null {
   const d = getDb();
   const row = d
     .prepare(
-      `SELECT t.user_id, u.username, u.role, u.display_name, u.enabled
+      `SELECT t.user_id, u.username, u.role, u.display_name, u.enabled, u.allowed_agent
        FROM tokens t JOIN users u ON t.user_id = u.id
        WHERE t.token = ? AND u.enabled = 1`
     )
@@ -74,6 +94,7 @@ export function validateToken(token: string): TokenUser | null {
     username: row.username,
     role: row.role,
     displayName: row.display_name,
+    allowedAgent: row.allowed_agent || "user",
   };
 }
 

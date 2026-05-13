@@ -2,29 +2,41 @@
   "agents": [
     {
       "id": "main",
-      "name": "通用助手",
-      "model": "xiaomi/mimo-v2.5-pro",
+      "name": "运维助手",
+      "model": "xiaomi/mimo-v2.5",
       "fallbacks": ["deepseek/deepseek-v4-flash"],
-      "systemPrompt": "你是 Pilot Code，一个智能编程助手。你可以读写文件、执行命令来帮助用户。请用中文回答。修改文件前先读取，使用 edit 做精确修改。",
-      "timeoutSeconds": 600
+      "systemPrompt": "你是 Pilot Code 运维助手，拥有完整的系统管理权限。\n\n你的职责：\n- 服务器运维：系统监控、服务管理、日志分析\n- 故障排查：诊断问题、修复错误、恢复服务\n- 部署管理：构建发布、环境配置、版本管理\n- 文件管理：读写配置、编辑脚本、管理项目文件\n\n你拥有所有工具的完整权限：read、write、edit、bash、opencode、claude_code。\n对于复杂的编程任务，你可以委派给 opencode 或 claude_code 处理。\n请用中文回答。",
+      "timeoutSeconds": 600,
+      "tools": ["read", "write", "edit", "bash", "opencode", "claude_code", "skill"]
     },
     {
       "id": "dev",
       "name": "开发助手",
-      "model": "xiaomi/mimo-v2.5-pro",
+      "model": "xiaomi/mimo-v2.5",
       "fallbacks": ["deepseek/deepseek-v4-flash"],
-      "systemPrompt": "你是一个专业的开发助手，专注于编写高质量代码。请用中文回答。遵循最佳实践，添加适当的错误处理和注释。",
-      "timeoutSeconds": 1200
+      "systemPrompt": "你是 Pilot Code 开发助手。你的唯一职责是任务识别和分发。\n\n严格规则：\n- 你不分析代码逻辑\n- 你不直接编写或修改代码\n- 你不手动编辑文件\n\n工作流程：\n1. 收到编程请求后，识别任务类型和范围\n2. 选择合适的 ACP 代理（opencode 或 claude_code）\n3. 用清晰完整的 prompt 描述任务并委派\n4. 将代理返回的结果转述给用户\n\n你只能使用 read 了解上下文，以及 opencode/claude_code 委派任务。\n请用中文回答。",
+      "timeoutSeconds": 1200,
+      "tools": ["read", "bash", "opencode", "claude_code", "skill"]
+    },
+    {
+      "id": "user",
+      "name": "个人助手",
+      "model": "xiaomi/mimo-v2.5",
+      "fallbacks": ["deepseek/deepseek-v4-flash"],
+      "systemPrompt": "你是 Pilot Code 个人分析和创作助手。\n\n你擅长：\n- 数据分析和可视化\n- 文本创作和文案撰写\n- 知识问答和信息整理\n- 文件内容分析和摘要\n\n严格限制：\n- 你不允许修改任何项目代码和系统配置文件\n- 你只能读取文件和执行查询类命令\n- 如果用户需要修改代码，请建议切换到运维助手(main)或开发助手(dev)\n\n请用中文回答。",
+      "timeoutSeconds": 600,
+      "tools": ["read", "bash", "skill"]
     }
   ],
   "models": {
-    "xiaomi/mimo-v2.5-pro": {
+    "xiaomi/mimo-v2.5": {
       "provider": "xiaomi",
       "api": "openai-completions",
       "baseUrl": "https://token-plan-cn.xiaomimimo.com/v1",
       "reasoning": true,
       "contextWindow": 1000000,
-      "maxTokens": 131072
+      "maxTokens": 131072,
+      "modalities": {"input": ["text", "image"], "output": ["text"]}
     },
     "deepseek/deepseek-v4-flash": {
       "provider": "deepseek",

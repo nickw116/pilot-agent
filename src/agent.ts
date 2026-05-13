@@ -3,6 +3,7 @@ import {
   streamSimpleOpenAICompletions,
   registerApiProvider,
   type Model,
+  type ImageContent,
 } from "@mariozechner/pi-ai";
 import fs from "fs";
 import path from "path";
@@ -12,6 +13,7 @@ import { bridgeAndPublish } from "./event-bridge.js";
 import { loadContext, appendContext, updateSessionTitle, type ContextMessage } from "./session.js";
 import { compactIfNeeded } from "./compaction.js";
 import { appendAuditLog } from "./audit.js";
+import { buildSkillSummary } from "./skills/index.js";
 
 registerApiProvider({
   api: "openai-completions",
@@ -28,6 +30,7 @@ interface AgentConfig {
   fallbacks: string[];
   systemPrompt: string;
   timeoutSeconds: number;
+  tools?: string[];
 }
 
 interface AgentsConfig {
@@ -39,6 +42,7 @@ interface AgentsConfig {
     reasoning: boolean;
     contextWindow: number;
     maxTokens: number;
+    modalities?: { input: string[]; output: string[] };
   }>;
 }
 
@@ -59,16 +63,23 @@ for (const ac of agentsConfig.agents || []) {
 }
 
 const mimoModel: Model<any> = {
-  id: "mimo-v2.5-pro",
-  name: "MiMo V2.5 Pro",
+  id: "mimo-v2.5",
+  name: "MiMo V2.5",
   api: "openai-completions",
   provider: "xiaomi",
   baseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
   reasoning: true,
-  input: ["text"],
+  input: ["text", "image"],
   cost: { input: 0.7, output: 2.1, cacheRead: 0.14, cacheWrite: 0 },
   contextWindow: 1000000,
   maxTokens: 131072,
+  compat: {
+    thinkingFormat: "deepseek",
+    requiresReasoningContentOnAssistantMessages: true,
+    supportsDeveloperRole: false,
+    supportsStore: false,
+    supportsReasoningEffort: false,
+  },
 };
 
 const deepseekModel: Model<any> = {
@@ -85,7 +96,7 @@ const deepseekModel: Model<any> = {
 };
 
 const DEFAULT_SYSTEM_PROMPT =
-  "你是 Pilot Code，一个智能编程助手。你可以读写文件、执行命令来帮助用户。请用中文回答。修改文件前先读取，使用 edit 做精确修改。";
+  "你是 Pilot Code，一个智能编程助手。你可以读写文件、执行命令来帮助用户。请用中文回答。修改文件前先读取，使用 edit 做精确修改。如果 opencode 工具可用，复杂的多文件编辑、调试或重构任务可以委托给 opencode 处理。";
 
 // --- SessionLane: per-session serial queue ---
 
@@ -144,20 +155,29 @@ function getAgent(sessionKey: string, userId: number, modelId?: string, agentId?
   }
 
   const ac = agentConfigs.get(agentId || "main");
-  const resolvedModelId = modelId || ac?.model || "xiaomi/mimo-v2.5-pro";
+  const resolvedModelId = modelId || ac?.model || "xiaomi/mimo-v2.5";
   const systemPrompt = ac?.systemPrompt || DEFAULT_SYSTEM_PROMPT;
   const model = resolveModel(resolvedModelId);
   if (!model) throw new Error(`Unknown model: ${resolvedModelId}`);
 
-  const userTools = createUserTools(getUserWorkspaceDir(userId));
+  const resolvedAgentId = agentId || "main";
+  const userTools = createUserTools(getUserWorkspaceDir(userId, resolvedAgentId), ac?.tools);
+
+  const skillSummary = buildSkillSummary();
+  const fullSystemPrompt = systemPrompt + skillSummary;
 
   const agent = new Agent({
     initialState: {
-      systemPrompt,
+      systemPrompt: fullSystemPrompt,
       model,
       tools: userTools,
+      thinkingLevel: resolvedModelId.includes("mimo") ? "medium" : "off",
     },
     streamFn: streamSimpleOpenAICompletions as any,
+    onPayload: (payload) => {
+      (payload as any).max_tokens = model.maxTokens;
+      return payload;
+    },
     getApiKey: (provider: string) => {
       if (provider === "xiaomi") return process.env.XIAOMI_API_KEY;
       if (provider === "deepseek") return process.env.DEEPSEEK_API_KEY;
@@ -197,57 +217,70 @@ function getAgent(sessionKey: string, userId: number, modelId?: string, agentId?
 }
 
 function resolveModel(modelId: string): Model<any> | null {
-  if (modelId === "xiaomi/mimo-v2.5-pro" || modelId === "mimo-v2.5-pro") return mimoModel;
-  if (modelId === "deepseek/deepseek-v4-flash" || modelId === "deepseek-v4-flash") return deepseekModel;
+  if (modelId === "xiaomi/mimo-v2.5" || modelId === "mimo-v2.5") {
+    const cfg = agentsConfig.models?.["xiaomi/mimo-v2.5"];
+    const inputModalities = (cfg?.modalities?.input || ["text"]) as ("text" | "image")[];
+    return { ...mimoModel, input: inputModalities };
+  }
+  if (modelId === "deepseek/deepseek-v4-flash" || modelId === "deepseek-v4-flash") {
+    return deepseekModel;
+  }
   return null;
+}
+
+function getApiKeyForProvider(provider: string): string | undefined {
+  if (provider === "xiaomi") return process.env.XIAOMI_API_KEY;
+  if (provider === "deepseek") return process.env.DEEPSEEK_API_KEY;
+  return undefined;
 }
 
 const currentRunIds = new Map<string, string>();
 
-async function doRunPrompt(message: string, sessionKey: string, userId: number, agentId?: string): Promise<string> {
+async function doRunPromptWithRunId(runId: string, message: string, sessionKey: string, userId: number, agentId?: string, images?: ImageContent[]): Promise<string> {
   const entry = agents.get(sessionKey);
-  const modelId = entry?.modelId || "xiaomi/mimo-v2.5-pro";
+  const modelId = entry?.modelId || "xiaomi/mimo-v2.5";
   const agent = getAgent(sessionKey, userId, modelId, agentId);
-  const runId = crypto.randomUUID();
   currentRunIds.set(sessionKey, runId);
   const startTime = Date.now();
   let errorMsg = "";
 
-  let fellback = false;
+  const model = resolveModel(modelId);
+  const apiKey = model ? getApiKeyForProvider(model.provider) : undefined;
+  if (model && !apiKey) {
+    const errMsg = `模型 ${modelId} 的 API Key 未配置`;
+    console.error(`[agent] ${errMsg}`);
+    publish(sessionKey, {
+      eventId: "",
+      kind: "run.error",
+      runId,
+      sessionKey,
+      payload: { error: errMsg },
+    });
+    publish(sessionKey, {
+      eventId: "",
+      kind: "run.end",
+      runId,
+      sessionKey,
+    });
+    currentRunIds.delete(sessionKey);
+    return runId;
+  }
+
+  console.log(`[agent] doRun: model=${modelId} hasImages=${!!images} imageCount=${images?.length || 0}`);
+
   try {
-    await agent.prompt(message);
+    await agent.prompt(message, images);
   } catch (err: any) {
     const errMsg = err?.message || "";
-    const isApiError = /rate.limit|429|5\d{2}|timeout|ECONNRESET|ETIMEDOUT/i.test(errMsg);
-  const ac = agentConfigs.get(agents.get(sessionKey)?.agentId || "main");
-  const fallbackModelId = ac?.fallbacks?.[0] || "deepseek/deepseek-v4-flash";
-  if (isApiError && modelId !== fallbackModelId) {
-    console.warn(`[agent] primary model failed (${errMsg.slice(0, 100)}), falling back to ${fallbackModelId}`);
-    agents.delete(sessionKey);
-    const fallbackAgent = getAgent(sessionKey, userId, fallbackModelId);
-      try {
-        await fallbackAgent.prompt(message);
-        fellback = true;
-      } catch (fbErr: any) {
-        publish(sessionKey, {
-          eventId: "",
-          kind: "run.error",
-          runId,
-          sessionKey,
-          payload: { error: `主模型和降级模型均失败: ${fbErr.message}` },
-        });
-        errorMsg = `主模型和降级模型均失败: ${fbErr.message}`;
-      }
-    } else {
-      publish(sessionKey, {
-        eventId: "",
-        kind: "run.error",
-        runId,
-        sessionKey,
-        payload: { error: errMsg || "Agent error" },
-      });
-      errorMsg = errMsg || "Agent error";
-    }
+    console.error(`[agent] prompt failed: ${errMsg}`, err?.stack || "");
+    publish(sessionKey, {
+      eventId: "",
+      kind: "run.error",
+      runId,
+      sessionKey,
+      payload: { error: errMsg || "Agent error" },
+    });
+    errorMsg = errMsg || "Agent error";
   } finally {
     currentRunIds.delete(sessionKey);
     const e = agents.get(sessionKey);
@@ -259,12 +292,12 @@ async function doRunPrompt(message: string, sessionKey: string, userId: number, 
     ?.filter((m: any) => m.role === "assistant")
     .pop();
   const toSave: ContextMessage[] = [{ role: "user", content: message }];
-  const modelName = fellback ? deepseekModel.name : mimoModel.name;
+  const resolvedModelName = model?.name || modelId;
   if (lastAssistant) {
     const text = typeof lastAssistant.content === "string"
       ? lastAssistant.content
       : (lastAssistant.content as any[])?.filter((b: any) => b.type === "text").map((b: any) => b.text).join("") || "";
-    if (text) toSave.push({ role: "assistant", content: text, model: modelName });
+    if (text) toSave.push({ role: "assistant", content: text, model: resolvedModelName });
   }
   appendContext(sessionKey, toSave);
 
@@ -281,7 +314,7 @@ async function doRunPrompt(message: string, sessionKey: string, userId: number, 
     userId,
     username: "",
     sessionKey,
-    model: fellback ? (agentConfigs.get(agentId || "main")?.fallbacks?.[0] || "deepseek/deepseek-v4-flash") : modelId,
+    model: modelId,
     durationMs: Date.now() - startTime,
     error: errorMsg || undefined,
   });
@@ -289,9 +322,26 @@ async function doRunPrompt(message: string, sessionKey: string, userId: number, 
   return runId;
 }
 
-export function runPrompt(message: string, sessionKey: string, userId: number, agentId?: string): Promise<string> {
+export function runPrompt(message: string, sessionKey: string, userId: number, agentId?: string, images?: ImageContent[]): Promise<string> {
+  const runId = crypto.randomUUID();
   const lane = getOrCreateLane(sessionKey);
-  return lane.enqueue(() => doRunPrompt(message, sessionKey, userId, agentId));
+  lane.enqueue(() => doRunPromptWithRunId(runId, message, sessionKey, userId, agentId, images)).catch((err) => {
+    console.error("[agent] runPrompt unhandled:", err.message);
+    publish(sessionKey, {
+      eventId: "",
+      kind: "run.error",
+      runId,
+      sessionKey,
+      payload: { error: err.message || "Unknown error" },
+    });
+    publish(sessionKey, {
+      eventId: "",
+      kind: "run.end",
+      runId,
+      sessionKey,
+    });
+  });
+  return Promise.resolve(runId);
 }
 
 export function abort(sessionKey: string): void {
@@ -319,9 +369,19 @@ export function destroyAgent(sessionKey: string): void {
 // --- Model switching ---
 
 const modelRegistry: Record<string, { name: string; alias: string }> = {
-  "xiaomi/mimo-v2.5-pro": { name: "MiMo V2.5 Pro", alias: "MiMo Pro" },
+  "xiaomi/mimo-v2.5": { name: "MiMo V2.5", alias: "MiMo" },
   "deepseek/deepseek-v4-flash": { name: "DeepSeek V4 Flash", alias: "DeepSeek" },
 };
+
+export function getAgentList(allowedIds?: string[]) {
+  const all = Array.from(agentConfigs.values()).map((ac) => ({
+    id: ac.id,
+    name: ac.name,
+    tools: ac.tools || [],
+  }));
+  if (!allowedIds) return all;
+  return all.filter((a) => allowedIds.includes(a.id));
+}
 
 export function getModelList() {
   return Object.entries(modelRegistry).map(([id, info]) => ({
@@ -329,6 +389,11 @@ export function getModelList() {
     name: info.name,
     alias: info.alias,
   }));
+}
+
+export function getCurrentModel(sessionKey: string): string | null {
+  const entry = agents.get(sessionKey);
+  return entry?.modelId || null;
 }
 
 export function switchModel(sessionKey: string, modelId: string, userId: number): boolean {

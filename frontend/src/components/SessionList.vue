@@ -66,6 +66,7 @@ const props = defineProps({
   token: { type: String, default: '' },
   currentSessionKey: { type: String, default: '' },
   currentAgentId: { type: String, default: 'main' },
+  agents: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits(['update:show', 'switch', 'new', 'delete'])
@@ -146,19 +147,18 @@ async function handleDelete(s) {
 }
 
 function formatTitle(s) {
-  const key = s.sessionKey || ''
-  // sessionKey format: agent:<agentId>:h5-<user>-<YYYYMMDD>-<suffix>
-  const colonParts = key.split(':')
-  const agentId = colonParts.length >= 2 ? colonParts[1] : ''
-  const dashParts = key.split('-')
-  const datePart = dashParts.length >= 2 ? dashParts[dashParts.length - 2] : ''
-  if (agentId && /^\d{8}$/.test(datePart)) {
-    const yyyy = datePart.slice(0, 4)
-    const mm = datePart.slice(4, 6)
-    const dd = datePart.slice(6, 8)
-    return `${agentId}会话 - ${yyyy}/${mm}/${dd}`
+  const agentId = s.agentId || ''
+  const agentName = props.agents.find(a => a.id === agentId)?.name || agentId || '会话'
+  const ts = s.createdAt
+  if (ts) {
+    const d = new Date(typeof ts === 'number' && ts < 1e12 ? ts * 1000 : ts)
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    const hh = String(d.getHours()).padStart(2, '0')
+    const mi = String(d.getMinutes()).padStart(2, '0')
+    return `${agentName} · ${mm}/${dd} ${hh}:${mi}`
   }
-  return key.slice(0, 30)
+  return agentName
 }
 </script>
 

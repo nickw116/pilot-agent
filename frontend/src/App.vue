@@ -43,6 +43,7 @@
       :token="token"
       :current-session-key="sessionKey"
       :current-agent-id="currentAgentId"
+      :agents="agents"
       @switch="handleSwitchSession"
       @new="handleNewSession"
     />

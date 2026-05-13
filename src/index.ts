@@ -14,7 +14,7 @@ import { checkRateLimit } from "./rate-limit.js";
 const PORT = parseInt(process.env.PORT || "8081", 10);
 
 const app = express();
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "100mb" }));
 
 // CORS
 app.use((_req, res, next) => {
@@ -59,7 +59,7 @@ app.post("/api/logout", auth, (req, res) => {
 
 app.get("/api/status", auth, (req, res) => {
   const user = (req as any).user;
-  res.json({ connected: true, user: user.username, role: user.role });
+  res.json({ connected: true, user: user.username, role: user.role, allowed_agent: user.allowedAgent });
 });
 
 app.post("/api/change-password", auth, (req, res) => {
@@ -75,39 +75,62 @@ app.post("/api/change-password", auth, (req, res) => {
 
 // --- Session routes ---
 
+app.get("/api/agents", auth, (req, res) => {
+  const user = (req as any).user;
+  const allowedIds = authMod.getAllowedAgents(user.allowedAgent);
+  res.json({ agents: agentModule.getAgentList(allowedIds) });
+});
+
 app.get("/api/session", auth, (req, res) => {
   const user = (req as any).user;
-  const s = sessionMod.getOrCreateActiveSession(user.userId, user.username);
+  const s = sessionMod.getOrCreateActiveSession(user.userId, user.username, user.allowedAgent);
   res.json({ sessionKey: s.session_key });
 });
 
 app.get("/api/sessions", auth, (req, res) => {
   const user = (req as any).user;
-  const sessions = sessionMod.listSessions(user.userId).map((s) => ({
+  const agentId = req.query.agent_id as string | undefined;
+  const sessions = sessionMod.listSessions(user.userId, agentId).map((s) => ({
     sessionKey: s.session_key,
     title: s.title,
+    agentId: s.agent_id,
+    createdAt: s.created_at,
     active: s.active === 1,
   }));
   res.json({ sessions });
 });
 
+function checkAgentPermission(user: any, agentId: string): boolean {
+  const allowedIds = authMod.getAllowedAgents(user.allowedAgent);
+  return allowedIds.includes(agentId);
+}
+
 app.post("/api/session/new", auth, (req, res) => {
   const user = (req as any).user;
   const { agent_id } = req.body || {};
-  const s = sessionMod.createSession(user.userId, user.username, agent_id || "main");
+  const aid = agent_id || "main";
+  if (!checkAgentPermission(user, aid)) {
+    return res.status(403).json({ detail: "No permission for this agent" });
+  }
+  const s = sessionMod.createSession(user.userId, user.username, aid);
   res.json({ sessionKey: s.session_key });
 });
 
 app.post("/api/sessions", auth, (req, res) => {
   const user = (req as any).user;
   const { agent_id } = req.body || {};
-  const s = sessionMod.createSession(user.userId, user.username, agent_id || "main");
+  const aid = agent_id || "main";
+  if (!checkAgentPermission(user, aid)) {
+    return res.status(403).json({ detail: "No permission for this agent" });
+  }
+  const s = sessionMod.createSession(user.userId, user.username, aid);
   res.json({ sessionKey: s.session_key });
 });
 
 app.put("/api/sessions/active", auth, (req, res) => {
   const user = (req as any).user;
-  const { session_key } = req.body || {};
+  const body = req.body || {};
+  const session_key = body.session_key || body.sessionKey;
   if (!session_key) return res.status(400).json({ detail: "Missing session_key" });
   const s = sessionMod.switchSession(user.userId, session_key);
   if (!s) return res.status(404).json({ detail: "Session not found" });
@@ -116,22 +139,25 @@ app.put("/api/sessions/active", auth, (req, res) => {
 
 app.delete("/api/sessions", auth, (req, res) => {
   const user = (req as any).user;
-  const { session_key } = req.body || {};
+  const body = req.body || {};
+  const query = req.query || {};
+  const session_key = body.session_key || body.sessionKey || query.sessionKey;
   if (!session_key) return res.status(400).json({ detail: "Missing session_key" });
-  agentModule.destroyAgent(session_key);
-  const ok = sessionMod.deleteSession(user.userId, session_key);
+  agentModule.destroyAgent(session_key as string);
+  const ok = sessionMod.deleteSession(user.userId, session_key as string);
   if (!ok) return res.status(404).json({ detail: "Session not found" });
   res.json({ ok: true });
 });
 
 // --- Chat ---
 
-app.post("/api/chat/v2", auth, (req, res) => {
+app.post("/api/chat/v2", auth, async (req, res) => {
   const user = (req as any).user;
   if (!checkRateLimit(user.userId)) {
     return res.status(429).json({ detail: "请求过于频繁，请稍后再试" });
   }
-  const { message, session_key } = req.body || {};
+  const { message, session_key, images } = req.body || {};
+  console.log(`[chat/v2] message=${(message || "").slice(0, 80)} images=${images?.length || 0} session=${session_key}`);
   if (!message) return res.status(400).json({ detail: "No message" });
 
   // Resolve session
@@ -141,18 +167,44 @@ app.post("/api/chat/v2", auth, (req, res) => {
   const sk = s?.session_key || sessionMod.getOrCreateActiveSession(user.userId, user.username).session_key;
   const agentId = s?.agent_id || "main";
 
-  // Fire-and-forget
-  agentModule.runPrompt(message, sk, user.userId, agentId).catch((err) => {
-    console.error("[chat/v2] agent error:", err.message);
-  });
+  const imageContent = Array.isArray(images) && images.length > 0
+    ? images.map((img: any) => ({
+        type: "image" as const,
+        data: img.data,
+        mimeType: img.mimeType,
+      }))
+    : undefined;
 
-  res.json({ ok: true, sessionKey: sk });
+  // Fire-and-forget (runId available immediately)
+  const runId = agentModule.runPrompt(message, sk, user.userId, agentId, imageContent);
+  res.json({ ok: true, sessionKey: sk, runId: await runId });
 });
 
-// Legacy chat alias
-app.post("/api/chat", (req, _res, next) => {
-  req.url = "/api/chat/v2";
-  next("router");
+app.post("/api/chat", auth, async (req, res) => {
+  const user = (req as any).user;
+  if (!checkRateLimit(user.userId)) {
+    return res.status(429).json({ detail: "请求过于频繁，请稍后再试" });
+  }
+  const { message, session_key, images } = req.body || {};
+  console.log(`[chat] message=${(message || "").slice(0, 80)} images=${images?.length || 0} session=${session_key}`);
+  if (!message) return res.status(400).json({ detail: "No message" });
+
+  const s = session_key
+    ? sessionMod.switchSession(user.userId, session_key)
+    : sessionMod.getOrCreateActiveSession(user.userId, user.username);
+  const sk = s?.session_key || sessionMod.getOrCreateActiveSession(user.userId, user.username).session_key;
+  const agentId = s?.agent_id || "main";
+
+  const imageContent = Array.isArray(images) && images.length > 0
+    ? images.map((img: any) => ({
+        type: "image" as const,
+        data: img.data,
+        mimeType: img.mimeType,
+      }))
+    : undefined;
+
+  const runId = await agentModule.runPrompt(message, sk, user.userId, agentId, imageContent);
+  res.json({ ok: true, sessionKey: sk, runId });
 });
 
 app.post("/api/abort", auth, (req, res) => {
@@ -212,9 +264,12 @@ app.get("/api/history", auth, (req, res) => {
 
 // --- Models ---
 
-app.get("/api/models", auth, (_req, res) => {
+app.get("/api/models", auth, (req, res) => {
+  const sessionKey = (req.query.sessionKey as string) || "";
+  const current = sessionKey ? agentModule.getCurrentModel(sessionKey) : null;
   res.json({
     models: agentModule.getModelList(),
+    default: current || agentModule.getModelList()[0]?.id || "",
   });
 });
 
@@ -268,10 +323,31 @@ app.post("/api/upload", auth, upload.single("file"), (req, res) => {
   }
   const ws = userWorkspace(user.userId);
   const relativePath = path.relative(ws, file.path);
-  res.json({
+
+  const result: Record<string, any> = {
     url: `/api/download?path=${encodeURIComponent(relativePath)}`,
     filename: file.originalname,
-  });
+    mimetype: file.mimetype,
+    size: file.size,
+  };
+
+  if (file.mimetype.startsWith("image/")) {
+    const b64 = fs.readFileSync(file.path).toString("base64");
+    result.inline = `data:${file.mimetype};base64,${b64}`;
+    result.preview = result.inline;
+  } else {
+    const TEXT_EXTENSIONS = [".txt", ".md", ".csv", ".json", ".xml", ".html", ".css", ".js", ".ts", ".jsx", ".tsx", ".py", ".java", ".c", ".cpp", ".h", ".go", ".rs", ".rb", ".php", ".sh", ".bash", ".yml", ".yaml", ".toml", ".ini", ".cfg", ".conf", ".log", ".sql", ".vue", ".svelte", ".swift", ".kt"];
+    const ext = path.extname(file.originalname || "").toLowerCase();
+    const sizeLimit = 100_000;
+    if (TEXT_EXTENSIONS.includes(ext) || (file.mimetype && file.mimetype.startsWith("text/")) || file.size <= sizeLimit) {
+      try {
+        const content = fs.readFileSync(file.path, "utf-8");
+        result.textContent = content.length > 50000 ? content.slice(0, 50000) + "\n... (truncated)" : content;
+      } catch {}
+    }
+  }
+
+  res.json(result);
 });
 
 app.get("/api/download", auth, (req, res) => {

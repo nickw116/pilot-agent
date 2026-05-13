@@ -68,8 +68,13 @@ export function getOrCreateActiveSession(userId: number, username: string, agent
   return createSession(userId, username, agentId);
 }
 
-/** List all sessions for a user */
-export function listSessions(userId: number): Session[] {
+/** List sessions for a user, optionally filtered by agentId */
+export function listSessions(userId: number, agentId?: string): Session[] {
+  if (agentId) {
+    return getDb()
+      .prepare("SELECT * FROM sessions WHERE user_id = ? AND agent_id = ? ORDER BY updated_at DESC")
+      .all(userId, agentId) as Session[];
+  }
   return getDb()
     .prepare("SELECT * FROM sessions WHERE user_id = ? ORDER BY updated_at DESC")
     .all(userId) as Session[];

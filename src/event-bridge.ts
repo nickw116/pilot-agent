@@ -43,12 +43,14 @@ function translate(
 
     case "message_update": {
       const sub = event.assistantMessageEvent;
-      // text delta
       if (sub.type === "text_delta" && sub.delta) {
         accumulatedText += sub.delta;
         return [sse("assistant.delta", runId, sessionKey, { delta: sub.delta })];
       }
-      // tool call start
+      if (sub.type === "thinking_delta" && sub.delta) {
+        accumulatedText += sub.delta;
+        return [sse("assistant.delta", runId, sessionKey, { delta: sub.delta })];
+      }
       if (sub.type === "toolcall_start") {
         const subAny = sub as any;
         return [

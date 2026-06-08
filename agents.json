@@ -45,6 +45,18 @@
       "reasoning": false,
       "contextWindow": 128000,
       "maxTokens": 8192
+    },
+    "minimax/m3": {
+      "provider": "minimax",
+      "api": "openai-completions",
+      "baseUrl": "https://api.minimaxi.com/v1",
+      "reasoning": true,
+      "contextWindow": 1000000,
+      "maxTokens": 131072,
+      "modalities": {
+        "input": ["text", "image"],
+        "output": ["text"]
+      }
     }
   }
 }

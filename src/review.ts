@@ -82,9 +82,9 @@ export async function callMimoReview(
   ccOutput: string,
   changes: ChangedFile[]
 ): Promise<ReviewResult> {
-  const apiKey = process.env.XIAOMI_API_KEY;
+  const apiKey = process.env.ZAI_API_KEY || process.env.Z_AI_API_KEY;
   if (!apiKey) {
-    return { hasIssues: false, review: "MIMO API Key 未配置，跳过 review" };
+    return { hasIssues: false, review: "GLM API Key 未配置，跳过 review" };
   }
 
   const filesText = changes
@@ -120,7 +120,7 @@ ${filesText}
     const timeout = setTimeout(() => controller.abort(), 120_000);
 
     const response = await fetch(
-      "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
+      "https://open.bigmodel.cn/api/paas/v4/chat/completions",
       {
         method: "POST",
         signal: controller.signal,
@@ -129,7 +129,7 @@ ${filesText}
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "mimo-v2.5",
+          model: "glm-5.1",
           messages: [
             {
               role: "system",
@@ -148,11 +148,11 @@ ${filesText}
     if (!response.ok) {
       const text = await response.text().catch(() => "");
       console.error(
-        "[review] MIMO API error:",
+        "[review] GLM API error:",
         response.status,
         text.slice(0, 200)
       );
-      return { hasIssues: false, review: `MIMO API 错误 (${response.status})` };
+      return { hasIssues: false, review: `GLM API 错误 (${response.status})` };
     }
 
     const data = (await response.json()) as any;
@@ -178,9 +178,9 @@ ${filesText}
     return { hasIssues, review: reviewText };
   } catch (err: any) {
     if (err.name === "AbortError") {
-      return { hasIssues: false, review: "MIMO Review 超时" };
+      return { hasIssues: false, review: "GLM Review 超时" };
     }
-    console.error("[review] MIMO call failed:", err.message);
+    console.error("[review] GLM call failed:", err.message);
     return { hasIssues: false, review: `Review 调用失败: ${err.message}` };
   }
 }

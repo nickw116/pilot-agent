@@ -18,31 +18,26 @@ interface MediaProvider {
 
 const providers: MediaProvider[] = [
   {
-    name: "MiMo",
-    getApiKey: () => process.env.XIAOMI_API_KEY,
+    name: "MiniMax",
+    getApiKey: () => process.env.MINIMAX_API_KEY,
     image: {
-      url: "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
-      model: "mimo-v2.5",
-      priority: 10,
-    },
-    audio: {
-      url: "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
-      model: "mimo-v2.5",
+      url: "https://api.minimaxi.com/v1/chat/completions",
+      model: "MiniMax-M3",
       priority: 10,
     },
     video: {
-      url: "https://token-plan-cn.xiaomimimo.com/v1/chat/completions",
-      model: "mimo-v2.5",
+      url: "https://api.minimaxi.com/v1/chat/completions",
+      model: "MiniMax-M3",
       priority: 10,
     },
   },
   {
     name: "GLM",
     getApiKey: () => process.env.ZAI_API_KEY || process.env.Z_AI_API_KEY,
-    image: {
-      url: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-      model: "glm-5v-turbo",
-      priority: 20,
+    audio: {
+      url: "https://open.bigmodel.cn/api/paas/v4/audio/transcriptions",
+      model: "glm-asr-2512",
+      priority: 10,
     },
   },
 ];
@@ -73,6 +68,39 @@ function providersFor(kind: "image" | "audio" | "video"): Array<{ provider: Medi
     .filter((p) => p[kind])
     .map((p) => ({ provider: p, endpoint: p[kind]! }))
     .sort((a, b) => a.endpoint.priority - b.endpoint.priority);
+}
+
+function isAsrEndpoint(url: string): boolean {
+  return url.includes("/audio/transcriptions") || url.includes("/audio/asr");
+}
+
+async function callAsrEndpoint(url: string, apiKey: string, audioBase64: string, model: string): Promise<string> {
+  const audioBuffer = Buffer.from(audioBase64, "base64");
+  const boundary = "----FormBoundary" + Math.random().toString(36).slice(2);
+  const parts: Buffer[] = [];
+
+  parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\n${model}\r\n`));
+  parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="response_format"\r\n\r\njson\r\n`));
+  parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="audio.wav"\r\nContent-Type: audio/wav\r\n\r\n`));
+  parts.push(audioBuffer);
+  parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": `multipart/form-data; boundary=${boundary}`,
+    },
+    body: Buffer.concat(parts),
+  });
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`HTTP ${resp.status}: ${errText.slice(0, 200)}`);
+  }
+  const data = await resp.json();
+  const text = data.text?.trim();
+  if (!text) throw new Error("Empty response");
+  return text;
 }
 
 // --- Image understanding ---
@@ -160,20 +188,25 @@ export async function transcribeAudio(audioBase64: string, format: string = "wav
     if (!apiKey) continue;
     try {
       console.log(`[media-provider] audio → ${provider.name} (${endpoint.model}), ${audioBase64.length} chars base64`);
-      const text = await callOpenAIChat(endpoint.url, apiKey, {
-        model: endpoint.model,
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: "请将这段语音逐字转录为文字。如果没有任何语音内容，只回复一个空字符串。" },
-              { type: "input_audio", input_audio: { data: audioBase64, format } },
-            ],
-          },
-        ],
-        stream: false,
-        max_tokens: 2048,
-      });
+      let text: string;
+      if (isAsrEndpoint(endpoint.url)) {
+        text = await callAsrEndpoint(endpoint.url, apiKey, audioBase64, endpoint.model);
+      } else {
+        text = await callOpenAIChat(endpoint.url, apiKey, {
+          model: endpoint.model,
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: "请将这段语音逐字转录为文字。如果没有任何语音内容，只回复一个空字符串。" },
+                { type: "input_audio", input_audio: { data: audioBase64, format } },
+              ],
+            },
+          ],
+          stream: false,
+          max_tokens: 2048,
+        });
+      }
       const cleaned = text.replace(/^["「『]|["」』]$/g, "").trim();
       console.log(`[media-provider] audio ← ${provider.name} ok (${cleaned.length} chars)`);
       return cleaned;

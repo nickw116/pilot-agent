@@ -103,7 +103,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { formatText, renderMarkdown, previewImage } from '../utils/format.js'
 import { downloadFile } from '../utils/download.js'
 import AcpLogPanel from './AcpLogPanel.vue'
@@ -113,41 +113,21 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
   formatFileSize: { type: Function, default: () => '' },
   fileIcon: { type: Function, default: () => '📄' },
+  acpLogs: { type: Array, default: () => [] },
+  acpStatus: { type: String, default: '' },
   currentAgentId: { type: String, default: 'main' },
 })
 
-const emit = defineEmits(['loadMore'])
+const emit = defineEmits(['load-more'])
 
 const listRef = ref(null)
-let observer = null
-
-const visibleMessages = computed(() =>
-  props.messages.filter((msg) => {
-    if (msg.content?.trim()) return true
-    if (msg.thinking?.trim()) return true
-    if (msg.media?.images?.length || msg.media?.pdfs?.length) return true
-    if (msg.steps?.length || msg.files?.length) return true
-    if (props.currentAgentId === 'dev' && msg.acpLogs?.length) return true
-    if (msg.isStreaming) return true
-    return false
-  })
-)
-
-function isStreamingAssistant(msg) {
-  return Boolean(msg && msg.role === 'assistant' && msg.isStreaming)
-}
-
-function shouldShowThinking(msg) {
-  const visible = visibleMessages.value
-  const lastVisible = visible[visible.length - 1]
-  return (
-    msg.role === 'assistant' &&
-    props.loading &&
-    lastVisible &&
-    lastVisible.id === msg.id &&
-    !msg.content
-  )
-}
+const BOTTOM_THRESHOLD = 100
+const RENDER_WINDOW = 40
+const visibleMessages = computed(() => {
+  const msgs = props.messages
+  if (msgs.length <= RENDER_WINDOW) return msgs
+  return msgs.slice(-RENDER_WINDOW)
+})
 
 function getMsgRenderText(msg) {
   if (msg.media && msg.media.text !== undefined) {
@@ -156,23 +136,19 @@ function getMsgRenderText(msg) {
   return msg.content || ''
 }
 
-function processMsgMedia(msg) {
-  if (msg.role !== 'assistant') return
-  const text = getMsgRenderText(msg)
-  if (msg._renderedContent !== text) {
-    Object.defineProperty(msg, '_renderedContent', {
-      value: text,
-      enumerable: false,
-      configurable: true,
-      writable: true
-    })
-    Object.defineProperty(msg, '_renderedCache', {
-      value: renderMarkdown(text),
-      enumerable: false,
-      configurable: true,
-      writable: true
-    })
-  }
+function isStreamingAssistant(msg) {
+  if (msg.role !== 'assistant') return false
+  if (msg.isStreaming) return true
+  const last = props.messages[props.messages.length - 1]
+  return last && last.id === msg.id && last.isStreaming
+}
+
+function shouldShowThinking(msg) {
+  return msg.role === 'assistant' && props.loading && isStreamingAssistant(msg) && !msg.content
+}
+
+function handleImgError(e) {
+  e.target.style.display = 'none'
 }
 
 function pdfFileName(url) {
@@ -184,23 +160,8 @@ function pdfFileName(url) {
   }
 }
 
-function handleImgError(e) {
-  e.target.style.display = 'none'
-}
-
 function handleDownload(file) {
   downloadFile(file)
-}
-
-function isAcpRunning(msg) {
-  if (msg.isStreaming) return true
-  const logs = msg.acpLogs
-  if (!logs || logs.length === 0) return false
-  for (let i = logs.length - 1; i >= 0; i--) {
-    if (logs[i].type === 'tool_start') return true
-    if (logs[i].type === 'tool_end') return false
-  }
-  return false
 }
 
 function downloadMediaUrl(url) {
@@ -210,99 +171,42 @@ function downloadMediaUrl(url) {
 
 function scrollToBottom() {
   const el = listRef.value
-  if (!el) return
-  el.scrollTop = el.scrollHeight
+  if (el) {
+    el.scrollTop = el.scrollHeight
+  }
 }
 
-function attachInlineImgListeners() {
-  const container = listRef.value
-  if (!container) return
-  container.querySelectorAll('.text.markdown img').forEach(img => {
-    if (img.dataset.previewAttached) return
-    img.dataset.previewAttached = '1'
-    img.addEventListener('click', (e) => {
-      e.stopPropagation()
-      previewImage(img.src)
-    })
-  })
-}
-
-function handleBubbleClick(e) {
-  const btn = e.target.closest('.code-copy')
-  if (!btn) return
-  const codeBlock = btn.closest('.code-block')
-  const codeEl = codeBlock?.querySelector('code')
-  if (!codeEl) return
-  const text = codeEl.textContent
-  const original = btn.textContent
-
-  function markCopied() {
-    btn.textContent = '已复制'
-    setTimeout(() => { btn.textContent = original }, 1500)
-  }
-
-  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-    navigator.clipboard.writeText(text).then(markCopied).catch((err) => {
-      console.warn('Copy failed:', err)
-    })
-    return
-  }
-
-  const textarea = document.createElement('textarea')
-  textarea.value = text
-  textarea.style.position = 'fixed'
-  textarea.style.left = '-9999px'
-  textarea.style.top = '0'
-  document.body.appendChild(textarea)
-  textarea.focus()
-  textarea.select()
-  try {
-    const ok = document.execCommand('copy')
-    if (ok) markCopied()
-  } catch (err) {
-    console.warn('Copy fallback failed:', err)
-  }
-  document.body.removeChild(textarea)
-}
-
-onMounted(() => {
+function handleScroll() {
   const el = listRef.value
   if (!el) return
-  scrollToBottom()
-  el.addEventListener('click', handleBubbleClick)
-  attachInlineImgListeners()
+  if (el.scrollTop < 60) {
+    emit('load-more')
+  }
+}
 
-  observer = new MutationObserver(() => {
-    attachInlineImgListeners()
-    requestAnimationFrame(() => {
-      scrollToBottom()
-      setTimeout(scrollToBottom, 100)
+// Auto-scroll on new messages
+watch(
+  () => props.messages.length,
+  () => {
+    nextTick(() => {
+      const el = listRef.value
+      if (!el) return
+      const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+      if (distanceToBottom < BOTTOM_THRESHOLD * 2) {
+        scrollToBottom()
+      }
     })
-  })
-  observer.observe(el, {
-    childList: true,
-    subtree: true,
-  })
+  }
+)
+
+onMounted(() => {
+  listRef.value?.addEventListener('scroll', handleScroll, { passive: true })
+  scrollToBottom()
 })
 
 onBeforeUnmount(() => {
-  if (observer) observer.disconnect()
-  const el = listRef.value
-  if (el) el.removeEventListener('click', handleBubbleClick)
+  listRef.value?.removeEventListener('scroll', handleScroll)
 })
-
-watch(
-  () => props.messages.length,
-  () => nextTick(scrollToBottom)
-)
-
-watch(
-  () => props.messages,
-  (messages) => {
-    for (const msg of messages) processMsgMedia(msg)
-  },
-  { deep: true, immediate: true }
-)
 
 defineExpose({ scrollToBottom })
 </script>
@@ -312,20 +216,15 @@ defineExpose({ scrollToBottom })
 .message-list {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 12px;
-  padding-top: 60px;
-  padding-bottom: 16px;
+  padding: 12px 14px;
+  scroll-behavior: smooth;
   -webkit-overflow-scrolling: touch;
 }
-@media (min-width: 1200px) {
-  .message-list {
-    padding-left: 24px;
-    padding-right: 24px;
-  }
-}
+
+/* ── Message Item ── */
 .message-item {
   display: flex;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
   max-width: 85%;
   animation: fadeInUp 0.35s ease;
 }
@@ -339,8 +238,8 @@ defineExpose({ scrollToBottom })
 
 /* ── Bubble ── */
 .bubble {
-  padding: 12px 16px;
-  border-radius: 20px;
+  padding: 10px 14px;
+  border-radius: 18px;
   font-size: 14px;
   line-height: 1.65;
   word-break: break-word;
@@ -350,10 +249,11 @@ defineExpose({ scrollToBottom })
   position: relative;
 }
 .message-item.user .bubble {
-  background: #D9D9D9;
-  color: #000000;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(139, 92, 246, 0.08));
+  color: var(--color-text);
+  border: 1px solid rgba(99, 102, 241, 0.15);
   border-radius: 18px;
-  box-shadow: none;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.06);
   max-width: 80%;
 }
 @media (min-width: 1200px) {
@@ -362,10 +262,12 @@ defineExpose({ scrollToBottom })
   }
 }
 .message-item.assistant .bubble {
-  background: #FFFFFF;
-  color: #1F1F1F;
+  background: var(--color-bg-glass);
+  backdrop-filter: blur(8px);
+  color: var(--color-text);
   border-radius: 18px;
-  box-shadow: none;
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
   max-width: 85%;
 }
 @media (min-width: 1200px) {
@@ -375,12 +277,12 @@ defineExpose({ scrollToBottom })
 }
 .text { min-height: 8px; }
 
-/* ── Typing Cursor (流式输出末尾闪烁光标) ── */
+/* ── Typing Cursor ── */
 .typing-cursor {
   display: inline-block;
   width: 2px;
   height: 1em;
-  background: var(--primary);
+  background: var(--color-primary);
   border-radius: 1px;
   margin-left: 2px;
   vertical-align: text-bottom;
@@ -402,7 +304,7 @@ defineExpose({ scrollToBottom })
   margin: 12px 0 6px;
   font-family: 'Space Grotesk', sans-serif;
   font-weight: 600;
-  color: var(--text);
+  color: var(--color-text);
 }
 .text.markdown h1 { font-size: 18px; }
 .text.markdown h2 { font-size: 16px; }
@@ -413,9 +315,9 @@ defineExpose({ scrollToBottom })
 }
 .text.markdown li { margin: 3px 0; }
 .text.markdown a {
-  color: var(--primary);
+  color: var(--color-primary);
   text-decoration: none;
-  border-bottom: 1px dashed var(--primary);
+  border-bottom: 1px dashed var(--color-primary);
 }
 .text.markdown a:hover { border-bottom-style: solid; }
 .text.markdown strong { font-weight: 600; }
@@ -423,10 +325,10 @@ defineExpose({ scrollToBottom })
 .text.markdown blockquote {
   margin: 8px 0;
   padding: 6px 12px;
-  border-left: 3px solid var(--primary);
-  background: rgba(0, 122, 255, 0.05);
+  border-left: 3px solid var(--color-primary);
+  background: rgba(99, 102, 241, 0.04);
   border-radius: 0 8px 8px 0;
-  color: #555;
+  color: var(--color-text-secondary);
 }
 .text.markdown table {
   width: 100%;
@@ -435,17 +337,17 @@ defineExpose({ scrollToBottom })
   font-size: 13px;
 }
 .text.markdown th, .text.markdown td {
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border);
   padding: 6px 10px;
   text-align: left;
 }
 .text.markdown th {
-  background: rgba(0, 122, 255, 0.08);
+  background: rgba(99, 102, 241, 0.04);
   font-weight: 600;
 }
 .text.markdown code:not(.hljs) {
-  background: rgba(0, 122, 255, 0.1);
-  color: var(--primary);
+  background: rgba(99, 102, 241, 0.06);
+  color: var(--color-primary);
   padding: 1px 5px;
   border-radius: 4px;
   font-size: 13px;
@@ -473,11 +375,11 @@ defineExpose({ scrollToBottom })
   display: block;
   margin: 4px 0;
   transition: opacity 0.2s;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 .media-img:hover {
   opacity: 0.85;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
 .media-pdfs {
   margin-bottom: 8px;
@@ -487,17 +389,17 @@ defineExpose({ scrollToBottom })
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  background: rgba(0, 122, 255, 0.06);
-  border: 1px solid rgba(0, 122, 255, 0.15);
+  background: rgba(99, 102, 241, 0.04);
+  border: 1px solid rgba(99, 102, 241, 0.1);
   border-radius: 8px;
-  color: var(--text);
+  color: var(--color-text);
   text-decoration: none;
   margin: 4px 0;
   transition: background 0.2s, border-color 0.2s;
 }
 .pdf-card:hover {
-  background: rgba(0, 122, 255, 0.12);
-  border-color: rgba(0, 122, 255, 0.3);
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.15);
 }
 .pdf-icon {
   font-size: 20px;
@@ -511,7 +413,7 @@ defineExpose({ scrollToBottom })
 }
 .pdf-action {
   font-size: 12px;
-  color: var(--primary);
+  color: var(--color-primary);
   white-space: nowrap;
 }
 .pdf-card-link {
@@ -531,15 +433,15 @@ defineExpose({ scrollToBottom })
   height: 32px;
   border-radius: 8px;
   border: none;
-  background: rgba(0, 122, 255, 0.1);
-  color: var(--primary);
+  background: rgba(99, 102, 241, 0.06);
+  color: var(--color-primary);
   cursor: pointer;
   transition: all 0.2s ease;
   flex-shrink: 0;
 }
 .pdf-download-btn:active {
   transform: scale(0.92);
-  background: rgba(0, 122, 255, 0.2);
+  background: rgba(99, 102, 241, 0.12);
 }
 
 /* ── Code Block ── */
@@ -606,9 +508,9 @@ defineExpose({ scrollToBottom })
 /* ── Thinking Block ── */
 .thinking-block {
   margin-bottom: 8px;
-  border-left: 3px solid rgba(0, 122, 255, 0.3);
+  border-left: 3px solid rgba(99, 102, 241, 0.15);
   border-radius: 0 6px 6px 0;
-  background: rgba(0, 122, 255, 0.04);
+  background: rgba(99, 102, 241, 0.03);
 }
 .thinking-header {
   display: flex;
@@ -623,18 +525,18 @@ defineExpose({ scrollToBottom })
 }
 .thinking-label {
   font-size: 12px;
-  color: #888;
+  color: var(--color-text-muted);
   flex: 1;
 }
 .thinking-toggle {
   font-size: 11px;
-  color: var(--primary);
+  color: var(--color-primary);
   opacity: 0.7;
 }
 .thinking-content {
   padding: 0 10px 8px;
   font-size: 12px;
-  color: #888;
+  color: var(--color-text-secondary);
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
@@ -651,13 +553,13 @@ defineExpose({ scrollToBottom })
 }
 .sse-count {
   font-size: 12px;
-  color: #888;
+  color: var(--color-text-muted);
   animation: pulse 1s infinite;
 }
 .dot {
   width: 7px;
   height: 7px;
-  background: var(--primary);
+  background: var(--color-primary);
   border-radius: 50%;
   opacity: 0.7;
   animation: bounce 1.2s ease-in-out infinite;
@@ -688,19 +590,19 @@ defineExpose({ scrollToBottom })
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  background: rgba(0, 122, 255, 0.06);
-  border: 1px solid rgba(0, 122, 255, 0.15);
+  background: rgba(99, 102, 241, 0.04);
+  border: 1px solid rgba(99, 102, 241, 0.1);
   border-radius: 12px;
-  color: var(--text);
+  color: var(--color-text);
   cursor: pointer;
   transition: all 0.2s ease;
   animation: fadeInUp 0.3s ease;
 }
 .file-card:hover {
-  background: rgba(0, 122, 255, 0.12);
-  border-color: var(--primary);
+  background: rgba(99, 102, 241, 0.08);
+  border-color: var(--color-primary);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.15);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.08);
 }
 .file-card:active {
   transform: scale(0.98);
@@ -719,18 +621,18 @@ defineExpose({ scrollToBottom })
 .file-card-name {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--color-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .file-card-size {
   font-size: 11px;
-  color: #888;
+  color: var(--color-text-muted);
 }
 .file-card-dl {
   flex-shrink: 0;
-  color: var(--primary);
+  color: var(--color-primary);
   opacity: 0.6;
   transition: opacity 0.2s ease;
 }

@@ -287,7 +287,7 @@ export class AcpClient {
           this.pending.delete(id);
           reject(new Error(`ACP request timeout: ${method}`));
         }
-      }, 300000);
+      }, 1200000);
     });
   }
 

@@ -2,7 +2,7 @@
   <div v-if="shouldRender" :class="['message-item', message.role]">
     <div class="bubble">
       <div
-        v-if="message.content || (message.media && (message.media.images.length > 0 || message.media.pdfs.length > 0))"
+        v-if="message.content || (message.media && (message.media.images.length > 0 || message.media.pdfs.length > 0 || message.media.files.length > 0))"
         class="text"
         :class="{ markdown: message.role === 'assistant' }"
         @click="onTextImageClick"
@@ -43,6 +43,29 @@
               type="button"
               class="pdf-download-btn"
               @click="downloadMediaUrl(pdfUrl)"
+              title="下载"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <!-- 可下载文件卡片（非图片/PDF 的本地文件） -->
+        <div v-if="message.media && message.media.files.length > 0" class="media-files">
+          <div
+            v-for="(file, fileIdx) in message.media.files"
+            :key="fileIdx"
+            class="pdf-card"
+          >
+            <span class="pdf-icon">{{ fileExtIcon(file.name) }}</span>
+            <span class="pdf-name">{{ file.name }}</span>
+            <button
+              type="button"
+              class="pdf-download-btn"
+              @click="onMediaFileDownload(file)"
               title="下载"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -153,7 +176,7 @@ const hasSteps = computed(() =>
 const shouldRender = computed(() => {
   const msg = props.message
   if (msg.content?.trim()) return true
-  if (msg.media?.images?.length || msg.media?.pdfs?.length) return true
+  if (msg.media?.images?.length || msg.media?.pdfs?.length || msg.media?.files?.length) return true
   if (msg.steps?.length || msg.files?.length) return true
   if (msg.isAcpCard) return true
   if (props.isStreaming || msg.isStreaming) return true
@@ -205,6 +228,29 @@ function downloadMediaUrl(url) {
   const filename = pdfFileName(url)
   downloadFile({ url, filename })
 }
+
+/**
+ * 从 media.files 数组下载文件
+ */
+function onMediaFileDownload(file) {
+  downloadFile({ url: file.url, filename: file.name })
+}
+
+/**
+ * 根据文件扩展名返回图标
+ */
+function fileExtIcon(name) {
+  if (!name) return '📄'
+  const ext = name.split('.').pop().toLowerCase()
+  const icons = {
+    py: '🐍', js: '📜', ts: '📜', html: '🌐', css: '🎨', json: '📋',
+    xlsx: '📊', xls: '📊', csv: '📊', doc: '📝', docx: '📝', ppt: '📽️', pptx: '📽️',
+    zip: '📦', tar: '📦', gz: '📦', rar: '📦', '7z': '📦',
+    mp3: '🎵', mp4: '🎬', wav: '🎵', avi: '🎬', mkv: '🎬',
+    md: '📝', txt: '📝', log: '📝', xml: '📋', yaml: '📋', yml: '📋',
+  }
+  return icons[ext] || '📎'
+}
 </script>
 
 <style>
@@ -236,10 +282,11 @@ function downloadMediaUrl(url) {
   position: relative;
 }
 .message-item.user .bubble {
-  background: #D9D9D9;
-  color: #000000;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(139, 92, 246, 0.08));
+  color: var(--color-text);
+  border: 1px solid rgba(99, 102, 241, 0.15);
   border-radius: 18px;
-  box-shadow: none;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.06);
   max-width: 80%;
 }
 @media (min-width: 1200px) {
@@ -248,10 +295,12 @@ function downloadMediaUrl(url) {
   }
 }
 .message-item.assistant .bubble {
-  background: #FFFFFF;
-  color: #1F1F1F;
+  background: var(--color-bg-glass);
+  backdrop-filter: blur(8px);
+  color: var(--color-text);
   border-radius: 18px;
-  box-shadow: none;
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
   max-width: 85%;
 }
 @media (min-width: 1200px) {
@@ -267,10 +316,10 @@ function downloadMediaUrl(url) {
 }
 
 .bubble--acp {
-  background: #F9FAFB;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
   border-top-left-radius: 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 /* ── Typing Cursor (流式输出末尾闪烁光标) ── */
@@ -278,7 +327,7 @@ function downloadMediaUrl(url) {
   display: inline-block;
   width: 2px;
   height: 1em;
-  background: var(--primary);
+  background: var(--color-primary);
   border-radius: 1px;
   margin-left: 2px;
   vertical-align: text-bottom;
@@ -300,7 +349,7 @@ function downloadMediaUrl(url) {
   margin: 12px 0 6px;
   font-family: 'Space Grotesk', sans-serif;
   font-weight: 600;
-  color: var(--text);
+  color: var(--color-text);
 }
 .text.markdown h1 { font-size: 18px; }
 .text.markdown h2 { font-size: 16px; }
@@ -311,9 +360,9 @@ function downloadMediaUrl(url) {
 }
 .text.markdown li { margin: 3px 0; }
 .text.markdown a {
-  color: var(--primary);
+  color: var(--color-primary);
   text-decoration: none;
-  border-bottom: 1px dashed var(--primary);
+  border-bottom: 1px dashed var(--color-primary);
 }
 .text.markdown a:hover { border-bottom-style: solid; }
 .text.markdown strong { font-weight: 600; }
@@ -321,10 +370,10 @@ function downloadMediaUrl(url) {
 .text.markdown blockquote {
   margin: 8px 0;
   padding: 6px 12px;
-  border-left: 3px solid var(--primary);
-  background: rgba(0, 122, 255, 0.05);
+  border-left: 3px solid var(--color-primary);
+  background: rgba(99, 102, 241, 0.04);
   border-radius: 0 8px 8px 0;
-  color: #555;
+  color: var(--color-text-secondary);
 }
 .text.markdown table {
   width: 100%;
@@ -333,17 +382,17 @@ function downloadMediaUrl(url) {
   font-size: 13px;
 }
 .text.markdown th, .text.markdown td {
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border);
   padding: 6px 10px;
   text-align: left;
 }
 .text.markdown th {
-  background: rgba(0, 122, 255, 0.06);
+  background: rgba(99, 102, 241, 0.05);
   font-weight: 600;
 }
 .text.markdown code:not(.hljs) {
-  background: rgba(0, 122, 255, 0.1);
-  color: var(--primary);
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--color-primary);
   padding: 1px 5px;
   border-radius: 4px;
   font-size: 13px;
@@ -371,11 +420,11 @@ function downloadMediaUrl(url) {
   display: block;
   margin: 4px 0;
   transition: opacity 0.2s;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 .media-img:hover {
   opacity: 0.85;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
 .media-pdfs {
   margin-bottom: 8px;
@@ -385,17 +434,17 @@ function downloadMediaUrl(url) {
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  background: rgba(0, 122, 255, 0.06);
-  border: 1px solid rgba(0, 122, 255, 0.15);
+  background: rgba(99, 102, 241, 0.05);
+  border: 1px solid rgba(99, 102, 241, 0.1);
   border-radius: 8px;
-  color: var(--text);
+  color: var(--color-text);
   text-decoration: none;
   margin: 4px 0;
   transition: background 0.2s, border-color 0.2s;
 }
 .pdf-card:hover {
-  background: rgba(0, 122, 255, 0.12);
-  border-color: rgba(0, 122, 255, 0.3);
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.15);
 }
 .pdf-icon {
   font-size: 20px;
@@ -409,7 +458,7 @@ function downloadMediaUrl(url) {
 }
 .pdf-action {
   font-size: 12px;
-  color: var(--primary);
+  color: var(--color-primary);
   white-space: nowrap;
 }
 .pdf-card-link {
@@ -429,15 +478,27 @@ function downloadMediaUrl(url) {
   height: 32px;
   border-radius: 8px;
   border: none;
-  background: rgba(0, 122, 255, 0.1);
-  color: var(--primary);
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--color-primary);
   cursor: pointer;
   transition: all 0.2s ease;
   flex-shrink: 0;
 }
 .pdf-download-btn:active {
   transform: scale(0.92);
-  background: rgba(0, 122, 255, 0.2);
+  background: rgba(99, 102, 241, 0.12);
+}
+
+/* === Downloadable Files (non-image/non-PDF) === */
+.media-files {
+  margin-bottom: 8px;
+}
+.media-files .pdf-card {
+  cursor: default;
+}
+.media-files .pdf-icon {
+  font-size: 22px;
+  flex-shrink: 0;
 }
 
 /* ── Code Block ── */
@@ -445,8 +506,8 @@ function downloadMediaUrl(url) {
   margin: 8px 0;
   border-radius: 10px;
   overflow: hidden;
-  background: #1e1e2e;
-  border: 1px solid rgba(255,255,255,0.08);
+  background: var(--color-code-bg);
+  border: 1px solid var(--color-code-border);
 }
 .code-header {
   display: flex;
@@ -481,12 +542,17 @@ function downloadMediaUrl(url) {
   padding: 12px;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  background: var(--color-code-bg);
+  border: none;
+  border-radius: 0;
 }
 .code-block code {
   font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 13px;
   line-height: 1.5;
-  color: #e2e8f0;
+  color: var(--color-code-text);
+  background: none;
+  padding: 0;
 }
 .code-block code .hljs-keyword { color: #c792ea; }
 .code-block code .hljs-string { color: #c3e88d; }
@@ -514,7 +580,7 @@ function downloadMediaUrl(url) {
 .dot {
   width: 7px;
   height: 7px;
-  background: var(--primary);
+  background: var(--color-primary);
   border-radius: 50%;
   opacity: 0.7;
   animation: bounce 1.2s ease-in-out infinite;
@@ -534,9 +600,9 @@ function downloadMediaUrl(url) {
   flex-direction: column;
   gap: 4px;
   padding: 8px 10px;
-  background: rgba(0, 122, 255, 0.04);
+  background: rgba(99, 102, 241, 0.03);
   border-radius: 10px;
-  border: 1px solid rgba(0, 122, 255, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.08);
 }
 
 .step-item {
@@ -544,20 +610,20 @@ function downloadMediaUrl(url) {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: #555;
+  color: var(--color-text-secondary);
 }
 
 .step-type {
   padding: 1px 6px;
   border-radius: 4px;
-  background: rgba(0, 122, 255, 0.1);
-  color: var(--primary);
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--color-primary);
   font-weight: 600;
   font-size: 11px;
 }
 
 .step-name {
-  color: var(--text);
+  color: var(--color-text);
 }
 
 /* ── File Download Cards ── */
@@ -572,19 +638,19 @@ function downloadMediaUrl(url) {
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  background: rgba(0, 122, 255, 0.06);
-  border: 1px solid rgba(0, 122, 255, 0.15);
+  background: rgba(99, 102, 241, 0.05);
+  border: 1px solid rgba(99, 102, 241, 0.1);
   border-radius: 12px;
-  color: var(--text);
+  color: var(--color-text);
   cursor: pointer;
   transition: all 0.2s ease;
   animation: fadeInUp 0.3s ease;
 }
 .file-card:hover {
-  background: rgba(0, 122, 255, 0.12);
-  border-color: var(--primary);
+  background: rgba(99, 102, 241, 0.1);
+  border-color: var(--color-primary);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.15);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.08);
 }
 .file-card:active {
   transform: scale(0.98);
@@ -603,22 +669,21 @@ function downloadMediaUrl(url) {
 .file-card-name {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--color-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .file-card-size {
   font-size: 11px;
-  color: #888;
+  color: var(--color-text-muted);
 }
 .file-card-dl {
   flex-shrink: 0;
-  color: var(--primary);
+  color: var(--color-primary);
   opacity: 0.6;
   transition: opacity 0.2s ease;
 }
 .file-card:hover .file-card-dl {
   opacity: 1;
 }
-</style>

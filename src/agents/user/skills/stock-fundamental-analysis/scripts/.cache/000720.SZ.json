@@ -1,0 +1,101 @@
+{
+  "stock": {
+    "code": "000720.SZ",
+    "name": "新能泰山",
+    "description": null,
+    "pe_median": 35.394188,
+    "pe_percentile": null,
+    "industry": {
+      "level1": "电力设备",
+      "level2": "电网设备",
+      "level3": "线缆部件及其他"
+    },
+    "is_leader": "否",
+    "fund": {
+      "holding": null,
+      "change": null
+    },
+    "northbound": {
+      "holding": 0.0,
+      "change": 0.0
+    }
+  },
+  "peers": [
+    {
+      "code": "920037.BJ",
+      "name": "广信科技",
+      "pe_median": 43.937042,
+      "pe_percentile": 1.0,
+      "is_leader": "是"
+    },
+    {
+      "code": "920018.BJ",
+      "name": "宏远股份",
+      "pe_median": 37.02436,
+      "pe_percentile": 14.5,
+      "is_leader": "否"
+    },
+    {
+      "code": "002606.SZ",
+      "name": "大连电瓷",
+      "pe_median": 51.593037,
+      "pe_percentile": 14.6,
+      "is_leader": "3"
+    },
+    {
+      "code": "002533.SZ",
+      "name": "金杯电工",
+      "pe_median": 19.69138,
+      "pe_percentile": 28.4,
+      "is_leader": "6"
+    },
+    {
+      "code": "603577.SH",
+      "name": "汇金通",
+      "pe_median": 45.363834,
+      "pe_percentile": 31.7,
+      "is_leader": "否"
+    },
+    {
+      "code": "603606.SH",
+      "name": "东方电缆",
+      "pe_median": 38.845963,
+      "pe_percentile": 33.8,
+      "is_leader": "2"
+    },
+    {
+      "code": "002276.SZ",
+      "name": "万马股份",
+      "pe_median": 42.66124,
+      "pe_percentile": 43.6,
+      "is_leader": "是"
+    },
+    {
+      "code": "603530.SH",
+      "name": "神马电力",
+      "pe_median": 61.721596,
+      "pe_percentile": 44.9,
+      "is_leader": "5"
+    },
+    {
+      "code": "002560.SZ",
+      "name": "通达股份",
+      "pe_median": 54.13692,
+      "pe_percentile": 44.9,
+      "is_leader": "否"
+    },
+    {
+      "code": "002879.SZ",
+      "name": "长缆科技",
+      "pe_median": 29.411032,
+      "pe_percentile": 45.4,
+      "is_leader": "否"
+    }
+  ],
+  "jiuyan": {
+    "available": false,
+    "warning": "韭研公社数据未配置（需登录 Cookie），题材/异动数据不可用"
+  },
+  "_report": "## 新能泰山（000720.SZ）基本面分析\n\n### 一、核心结论\n新能泰山（000720.SZ）属于电力设备 → 电网设备 → 线缆部件及其他行业，当前 PE 分位无数据。\n\n### 二、公司基本面\n- **主营业务**: 暂无描述\n- **行业分类**: 电力设备 → 电网设备 → 线缆部件及其他\n\n### 三、估值水平\n- **PE 中值**: 35.39\n- **PE 历史分位**: 无数据\n\n### 四、资金动向\n- **公募持仓**: 无数据\n- **北向持仓**: 0.00 亿元（持平）\n\n### 五、行业地位\n在 线缆部件及其他 中的 PE 对比：\n\n| 股票 | PE 中值 | PE 分位 | 龙头 |\n|------|---------|---------|------|\n| **新能泰山** | **35.4** | **-** |  |\n| 广信科技 | 43.9 | 1.0% | 是 |\n| 宏远股份 | 37.0 | 14.5% |  |\n| 大连电瓷 | 51.6 | 14.6% |  |\n| 金杯电工 | 19.7 | 28.4% |  |\n| 汇金通 | 45.4 | 31.7% |  |\n| 东方电缆 | 38.8 | 33.8% |  |\n| 万马股份 | 42.7 | 43.6% | 是 |\n| 神马电力 | 61.7 | 44.9% |  |\n\n### 六、韭研公社题材参考\n*韭研公社数据未配置（需登录 Cookie），题材/异动数据不可用*\n\n### 七、投资亮点与风险\n- **亮点**:\n  1. 数据有限，暂无明显亮点\n- **风险**:\n  1. 缺少主营业务描述，信息不完整\n",
+  "cached_at": 1780539400.7706347
+}

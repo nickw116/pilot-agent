@@ -26,11 +26,11 @@
         :sse-reconnecting="eventStream.reconnecting"
         :models="models"
         :session-key="sessionKey"
-        :current-agent-id="currentAgentId"
         :monitor-mode="monitorMode"
         :monitor-messages="monitorMessages"
         :monitor-history-loading="monitorLoading"
         :monitor-user-info="monitorUserInfo"
+        :monitor-loading="monitorLoading"
         :can-access-monitor="canAccessMonitor"
         @update:input-text="inputText = $event"
         @send="handleSend"
@@ -41,6 +41,10 @@
         @hot-refresh="handleHotRefresh"
         @switch-model="handleSwitchModel"
         @open-monitor="showMonitor = true"
+        @open-sessions="handleOpenSessions"
+        @open-dashboard="showDashboard = true"
+        @monitor-send="handleMonitorSend"
+        @monitor-abort="handleMonitorAbort"
         @exit-monitor="handleExitMonitor"
       />
     </router-view>
@@ -49,22 +53,41 @@
       v-if="canAccessMonitor"
       v-model:show="showMonitor"
       :token="token"
-      :agents="agents"
       :current-session-key="sessionKey"
+      :current-username="currentUser?.username || ''"
+      :monitor-session-key="monitorSessionKey"
       @view-session="handleViewMonitorSession"
       @new="handleNewSession"
+      @delete="handleMonitorDeleteSession"
+    />
+
+    <SessionList
+      v-if="!canAccessMonitor"
+      v-model:show="showSessionList"
+      :token="token"
+      :current-session-key="sessionKey"
+      :current-agent-id="currentAgentId"
+      :agents="agents"
+      @switch="handleSwitchSession"
+      @new="handleNewSession"
+      @delete="handleSessionListDelete"
+    />
+
+    <AgentDashboard
+      v-if="canAccessMonitor"
+      v-model:show="showDashboard"
+      ref="dashboardRef"
+      :token="token"
+      :session-key="sessionKey"
     />
 
     <SettingsPopup
       v-model:show="showSettings"
       :current-user="currentUser"
       :session-key="sessionKey"
-      :agents="agents"
-      :current-agent-id="currentAgentId"
       @clear-chat="handleClearChat"
       @logout="handleLogout"
       @change-password="handleChangePassword"
-      @switch-agent="handleSwitchAgent"
     />
   </div>
 </template>
@@ -78,8 +101,10 @@ import { showNotify } from 'vant'
 import { useEventStream } from './composables/useEventStream.js'
 import { useServiceStatus } from './composables/useServiceStatus.js'
 import SessionMonitor from './components/SessionMonitor.vue'
+import SessionList from './components/SessionList.vue'
+import AgentDashboard from './components/AgentDashboard.vue'
 import SettingsPopup from './components/SettingsPopup.vue'
-import { API_BASE, API_SESSION, API_SESSIONS, API_SESSION_NEW, API_MODEL_SWITCH, API_AGENTS, API_ADMIN_SESSIONS, API_HISTORY } from './constants/index.js'
+import { API_BASE, API_SESSION, API_SESSIONS, API_SESSION_NEW, API_MODEL_SWITCH, API_ADMIN_SESSIONS, API_HISTORY, API_CHAT_V2, API_ABORT, API_AGENTS } from './constants/index.js'
 
 const router = useRouter()
 
@@ -151,14 +176,18 @@ const {
 const eventStream = useEventStream(token, sessionKey, {
   onEvent: (event) => {
     handleStreamEvent(event)
+    // Forward agent dashboard events
+    if (event.kind?.startsWith('agent.work.') && dashboardRef.value) {
+      dashboardRef.value.handleWorkEvent(event)
+    }
   },
 })
 
 const showSettings = ref(false)
+const showDashboard = ref(false)
+const dashboardRef = ref(null)
 const currentModel = ref('')
 const models = ref([])
-const agents = ref([])
-const currentAgentId = ref('main')
 const { serviceStatus } = useServiceStatus()
 let modelPollTimer = null
 const MODEL_POLL_INTERVAL = 30000
@@ -166,11 +195,18 @@ let _historyLoading = false
 
 // --- Monitor mode state ---
 const showMonitor = ref(false)
+const showSessionList = ref(false)
+const currentAgentId = computed(() => {
+  if (!currentUser.value) return 'user'
+  return currentUser.value.role === 'admin' ? 'main' : 'user'
+})
+const agents = ref([])
 const monitorMode = ref(false)
 const monitorSessionKey = ref('')
 const monitorMessages = ref([])
 const monitorLoading = ref(false)
 const monitorUserInfo = ref('')
+const monitorSending = ref(false)
 
 const canAccessMonitor = computed(() => {
   return currentUser.value &&
@@ -267,7 +303,6 @@ watch([loading, sessionKey, loggedIn], ([isLoading, activeSession, isLoggedIn]) 
   } else {
     stopModelPolling()
   }
-  if (activeSession) updateCurrentAgentId()
 })
 
 watch(
@@ -387,6 +422,20 @@ async function fetchModel(options = {}) {
   return false
 }
 
+async function fetchAgents() {
+  try {
+    const r = await fetch(`${API_BASE}${API_AGENTS}`, {
+      headers: { Authorization: `Bearer ${token.value}` },
+    })
+    if (r.ok) {
+      const data = await r.json()
+      agents.value = data.agents || []
+    }
+  } catch (err) {
+    console.error('[App] fetch agents failed:', err)
+  }
+}
+
 function startModelPolling() {
   if (modelPollTimer || !sessionKey.value || !loggedIn.value) return
 
@@ -470,86 +519,6 @@ async function handleSwitchModel(model) {
   }
 }
 
-async function fetchAgents() {
-  try {
-    const r = await fetch(`${API_BASE}${API_AGENTS}`, {
-      headers: { Authorization: `Bearer ${token.value}` },
-    })
-    if (r.ok) {
-      const data = await r.json()
-      agents.value = data.agents || []
-      updateCurrentAgentId()
-    }
-  } catch (err) {
-    console.error('[App] fetch agents failed:', err)
-  }
-}
-
-function updateCurrentAgentId() {
-  const sk = sessionKey.value
-  let parsed = null
-  if (sk && sk.startsWith('agent:')) {
-    const parts = sk.split(':')
-    if (parts.length >= 2) {
-      parsed = parts[1]
-    }
-  }
-  // 1. server-side preference
-  if (!parsed && currentUser.value?.preferredAgent) {
-    parsed = currentUser.value.preferredAgent
-  }
-  // 2. role default (allowedAgent)
-  if (!parsed && currentUser.value?.allowedAgent) {
-    parsed = currentUser.value.allowedAgent
-  }
-  // 3. ultimate fallback
-  if (!parsed) parsed = 'main'
-  const allowed = agents.value.map(a => a.id)
-  if (allowed.length > 0 && !allowed.includes(parsed)) {
-    parsed = allowed[0]
-  }
-  currentAgentId.value = parsed
-}
-
-async function handleSwitchAgent(agentId) {
-  if (loading.value) {
-    showNotify({ type: 'warning', message: '请等待当前回复完成' })
-    return
-  }
-  try {
-    const r = await fetch(`${API_BASE}${API_SESSIONS}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token.value}`,
-      },
-      body: JSON.stringify({ agent_id: agentId }),
-    })
-    if (r.ok) {
-      const data = await r.json()
-      sessionKey.value = data.sessionKey
-      currentAgentId.value = agentId
-      // Persist preference to server
-      fetch(`${API_BASE}/user/preferred-agent`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token.value}` },
-        body: JSON.stringify({ agent_id: agentId }),
-      }).catch(() => {})
-      messages.value = []
-      currentModel.value = ''
-      await fetchModel()
-      showNotify({ type: 'success', message: `已切换到 ${(agents.value.find(a => a.id === agentId))?.name || agentId}` })
-      showSettings.value = false
-    } else {
-      const text = await r.text()
-      showNotify({ type: 'danger', message: `切换失败: ${text}` })
-    }
-  } catch (err) {
-    console.error('[App] switch agent failed:', err)
-    showNotify({ type: 'danger', message: '切换助手失败，请重试' })
-  }
-}
-
   async function handleUpload(file) {
   try {
     const data = await uploadFile(file)
@@ -597,6 +566,20 @@ function handleChangePassword(oldPw, newPw, callback) {
   changePassword(oldPw, newPw).then(callback)
 }
 
+function handleOpenSessions() {
+  if (canAccessMonitor.value) {
+    showMonitor.value = true
+  } else {
+    showSessionList.value = true
+  }
+}
+
+function handleSessionListDelete(deletedKey) {
+  if (sessionKey.value === deletedKey) {
+    handleNewSession()
+  }
+}
+
 // ── Monitor Mode ──
 
 function normalizeMonitorRole(role) {
@@ -607,11 +590,29 @@ function normalizeMonitorRole(role) {
 }
 
 async function handleViewMonitorSession(s) {
+  // Clicking own session exits monitor mode
+  if (s.sessionKey === sessionKey.value) {
+    if (monitorMode.value) {
+      handleExitMonitor()
+    }
+    return
+  }
+  // Already monitoring this session — no-op
+  if (monitorMode.value && s.sessionKey === monitorSessionKey.value) {
+    return
+  }
+
+  // Disconnect previous monitor stream if switching
+  if (monitorMode.value) {
+    monitorEventStream.disconnect()
+  }
+
   monitorMode.value = true
   monitorSessionKey.value = s.sessionKey
   monitorUserInfo.value = `${s.displayName || s.username} · ${s.agentId}`
   monitorMessages.value = []
   monitorLoading.value = true
+  monitorSending.value = false
 
   try {
     const params = new URLSearchParams({ sessionKey: s.sessionKey, limit: '200' })
@@ -650,6 +651,78 @@ function handleExitMonitor() {
   monitorSessionKey.value = ''
   monitorMessages.value = []
   monitorUserInfo.value = ''
+  monitorSending.value = false
+}
+
+async function handleMonitorSend(message) {
+  if (!message || !monitorSessionKey.value) return
+  monitorSending.value = true
+
+  // Add user message to monitor view immediately
+  monitorMessages.value.push({
+    id: Date.now(),
+    role: 'user',
+    content: message,
+    files: [],
+    media: [],
+    steps: [],
+    acpLogs: [],
+  })
+
+  try {
+    const resp = await fetch(`${API_BASE}${API_CHAT_V2}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token.value}`,
+      },
+      body: JSON.stringify({
+        message,
+        session_key: monitorSessionKey.value,
+      }),
+    })
+    if (!resp.ok) {
+      const errText = await resp.text()
+      console.error('[App] monitor send failed:', resp.status, errText)
+      monitorMessages.value.push({
+        id: Date.now(),
+        role: 'assistant',
+        content: `发送失败 (${resp.status})`,
+        files: [],
+        media: [],
+        steps: [],
+        acpLogs: [],
+      })
+      monitorSending.value = false
+    }
+  } catch (err) {
+    console.error('[App] monitor send error:', err)
+    monitorMessages.value.push({
+      id: Date.now(),
+      role: 'assistant',
+      content: '发送失败，请重试',
+      files: [],
+      media: [],
+      steps: [],
+      acpLogs: [],
+    })
+    monitorSending.value = false
+  }
+}
+
+function handleMonitorAbort() {
+  if (!monitorSessionKey.value) return
+  fetch(`${API_BASE}${API_ABORT}?session_key=${monitorSessionKey.value}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token.value}` },
+  }).catch((err) => console.error('[App] monitor abort failed:', err))
+  monitorSending.value = false
+}
+
+function handleMonitorDeleteSession(deletedKey) {
+  if (monitorMode.value && monitorSessionKey.value === deletedKey) {
+    handleExitMonitor()
+  }
 }
 
 function handleMonitorStreamEvent(event) {
@@ -659,6 +732,7 @@ function handleMonitorStreamEvent(event) {
   if (kind === 'assistant.delta') {
     const delta = event.payload?.delta || ''
     if (!delta) return
+    monitorSending.value = true
     const last = monitorMessages.value[monitorMessages.value.length - 1]
     if (last && last.role === 'assistant' && last._streaming) {
       last.content += delta
@@ -688,6 +762,7 @@ function handleMonitorStreamEvent(event) {
     if (last && last._streaming) {
       last._streaming = false
     }
+    monitorSending.value = false
   } else if (kind === 'assistant.thinking') {
     // Ignore thinking deltas in monitor mode to keep it simple
   } else if (kind === 'tool_use') {
@@ -775,7 +850,7 @@ async function handleNewSession() {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token.value}`,
       },
-      body: JSON.stringify({ agent_id: currentAgentId.value }),
+      body: JSON.stringify({}),
     })
     if (r.ok) {
       const data = await r.json()
@@ -791,21 +866,30 @@ async function handleNewSession() {
 </script>
 
 <style>
-/* ── Variables ── */
+/* ── Legacy Variable Aliases (compat) ── */
 :root {
-  --primary: #007AFF;
-  --secondary: #8E8E8E;
-  --accent: #007AFF;
-  --bg: #F7F8FA;
-  --text: #1F1F1F;
-  --border: #E5E5E5;
-  --white: #ffffff;
+  --primary: var(--color-primary);
+  --secondary: var(--color-text-secondary);
+  --accent: var(--color-accent);
+  --bg: var(--color-bg);
+  --text: var(--color-text);
+  --border: var(--color-border);
+  --white: var(--color-bg-secondary);
   --gradient-user: none;
 }
 
 /* ── Base Reset ── */
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', Roboto, sans-serif; overflow: hidden; color: var(--text); -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+html, body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', Roboto, sans-serif;
+  overflow: hidden;
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  color-scheme: light;
+}
 #app, .app { height: 100%; }
 a { color: inherit; text-decoration: none; }
 button { font-family: inherit; }
@@ -813,8 +897,28 @@ button { font-family: inherit; }
 /* ── Transitions ── */
 * { scroll-behavior: auto; }
 
-/* ── Global Vant Overrides ── */
+/* ── Global Vant Dark Overrides ── */
 .van-cell-group--inset { border-radius: 14px; overflow: hidden; }
-.van-cell { background: #FFFFFF; }
-.van-field__label { color: var(--text); font-weight: 500; }
+.van-cell { background: var(--color-bg-secondary); color: var(--color-text); }
+.van-cell::after { border-color: var(--color-border); }
+.van-field__label { color: var(--color-text-secondary); font-weight: 500; }
+.van-field__control { color: var(--color-text); }
+.van-field__control::placeholder { color: var(--color-text-muted); }
+.van-popup { background: var(--color-bg-secondary) !important; }
+.van-action-sheet { background: var(--color-bg-secondary) !important; }
+.van-action-sheet__item { color: var(--color-text) !important; background: transparent !important; }
+.van-action-sheet__cancel { color: var(--color-text-secondary) !important; background: var(--color-bg) !important; }
+.van-action-sheet__description { color: var(--color-text-secondary) !important; }
+.van-action-sheet__gap { background: var(--color-bg) !important; }
+.van-overlay { background: rgba(0, 0, 0, 0.4) !important; }
+.van-button--default { background: var(--color-bg-tertiary); border-color: var(--color-border); color: var(--color-text); }
+.van-loading__text { color: var(--color-text-secondary); }
+.van-dialog { background: var(--color-bg-secondary) !important; }
+.van-dialog__header { color: var(--color-text) !important; }
+.van-dialog__message { color: var(--color-text-secondary) !important; }
+.van-nav-bar { background: var(--color-bg-secondary) !important; }
+.van-nav-bar__title { color: var(--color-text) !important; }
+.van-nav-bar__arrow { color: var(--color-text) !important; }
+.van-notify { background: var(--color-accent) !important; }
+.van-image-preview { background: rgba(0, 0, 0, 0.9) !important; }
 </style>

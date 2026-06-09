@@ -13,11 +13,11 @@
   <div id="app"></div>
   <script>
 window.onerror = function(msg, url, line, col, err) {
-  document.body.innerHTML = '<div style="padding:20px;color:red;background:#fff;font:16px monospace;white-space:pre-wrap;word-break:break-all;">JS ERROR: ' + msg + '\nFile: ' + url + ':' + line + ':' + col + '\nStack: ' + (err && err.stack || 'N/A') + '</div>';
+  document.body.innerHTML = '<div style="padding:20px;color:#FF4757;background:#0A0A0F;font:16px monospace;white-space:pre-wrap;word-break:break-all;">JS ERROR: ' + msg + '\nFile: ' + url + ':' + line + ':' + col + '\nStack: ' + (err && err.stack || 'N/A') + '</div>';
   return true;
 };
 window.addEventListener('unhandledrejection', function(e) {
-  document.body.innerHTML = '<div style="padding:20px;color:red;background:#fff;font:16px monospace;white-space:pre-wrap;word-break:break-all;">UNHANDLED PROMISE: ' + e.reason + '</div>';
+  document.body.innerHTML = '<div style="padding:20px;color:#FF4757;background:#0A0A0F;font:16px monospace;white-space:pre-wrap;word-break:break-all;">UNHANDLED PROMISE: ' + e.reason + '</div>';
 });
 </script>
   <script type="module" src="/src/main.js"></script>

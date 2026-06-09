@@ -7,36 +7,80 @@ import {
 } from "@mariozechner/pi-ai";
 import fs from "fs";
 import path from "path";
-import { createUserTools, getUserWorkspaceDir, setAcpSseContext, clearAcpSseContext } from "./tools.js";
+import { createUserTools, getUserWorkspaceDir, getAgentDir, setAcpSseContext, clearAcpSseContext } from "./tools.js";
 import { describeImages, describeVideo, transcribeAudio } from "./media-provider.js";
 import { publish } from "./sse.js";
 import { bridgeAndPublish } from "./event-bridge.js";
 import { loadContext, appendContext, updateSessionTitle, setSessionStatus, type ContextMessage } from "./session.js";
 import { compactIfNeeded } from "./compaction.js";
 import { appendAuditLog } from "./audit.js";
+
 import { buildSkillSummary } from "./skills/index.js";
 import { buildMemoryContext, appendDailyNote } from "./memory.js";
+import { loadAgentBootstrap, loadUserBootstrap, ensureAgentBootstrapFiles, ensureUserBootstrapFiles } from "./bootstrap.js";
+import { startAgentWork, endAgentWork, cleanupSessionTracker } from "./agent-tracker.js";
+import { execSync } from "child_process";
+
+const RESTART_FLAG_FILE = "/tmp/pilot-agent-restart-requested";
+
+function checkDelayedRestart(): void {
+  if (!fs.existsSync(RESTART_FLAG_FILE)) return;
+  try {
+    fs.unlinkSync(RESTART_FLAG_FILE);
+    console.log("[agent] delayed restart requested, scheduling in 1s...");
+    execSync("nohup bash -c 'sleep 1 && sudo systemctl restart pilot-agent' >/dev/null 2>&1 &", {
+      stdio: "ignore",
+    });
+  } catch (err) {
+    console.error("[agent] failed to schedule restart:", err);
+  }
+}
+
+const STREAM_TIMEOUT_MS = parseInt(process.env.STREAM_TIMEOUT_MS || "120000", 10);
+
+const FALLBACK_MODEL: Model<any> = {
+  id: "deepseek-v4-flash",
+  name: "DeepSeek V4 Flash",
+  api: "openai-completions",
+  provider: "deepseek",
+  baseUrl: "https://api.deepseek.com/v1",
+  reasoning: false,
+  input: ["text"],
+  cost: { input: 0.1, output: 0.4, cacheRead: 0.01, cacheWrite: 0 },
+  contextWindow: 128000,
+  maxTokens: 8192,
+};
+
+function isTimeoutError(err: any): boolean {
+  return err?.name === "TimeoutError" || /timeout/i.test(err?.message || "");
+}
+
+function streamWithFallback(model: any, context: any, options: any) {
+  const timeoutSignal = AbortSignal.timeout(STREAM_TIMEOUT_MS);
+  const combinedSignal = options?.signal
+    ? AbortSignal.any([options.signal, timeoutSignal])
+    : timeoutSignal;
+  return streamSimpleOpenAICompletions(model, context, { ...options, signal: combinedSignal });
+}
 
 registerApiProvider({
   api: "openai-completions",
-  stream: streamSimpleOpenAICompletions as any,
-  streamSimple: streamSimpleOpenAICompletions as any,
+  stream: streamWithFallback as any,
+  streamSimple: streamWithFallback as any,
 }, "xiaomi-openai");
 
-// --- Load agents.json config ---
+// --- Load config: models from agents.json, agent configs from src/agents/*/config.json ---
 
 interface AgentConfig {
   id: string;
   name: string;
   model: string;
-  fallbacks: string[];
-  systemPrompt: string;
-  timeoutSeconds: number;
   tools?: string[];
+  subAgents?: string[];
+  hidden?: boolean;
 }
 
-interface AgentsConfig {
-  agents: AgentConfig[];
+interface ModelsConfig {
   models: Record<string, {
     provider: string;
     api: string;
@@ -48,20 +92,33 @@ interface AgentsConfig {
   }>;
 }
 
-let agentsConfig: AgentsConfig = { agents: [], models: {} };
-const configPath = path.join(process.cwd(), "agents.json");
-if (fs.existsSync(configPath)) {
+let modelsConfig: ModelsConfig = { models: {} };
+const modelsConfigPath = path.join(process.cwd(), "agents.json");
+if (fs.existsSync(modelsConfigPath)) {
   try {
-    agentsConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-    console.log(`[config] loaded ${agentsConfig.agents?.length || 0} agent configs from agents.json`);
+    modelsConfig = JSON.parse(fs.readFileSync(modelsConfigPath, "utf-8"));
+    console.log(`[config] loaded model definitions from agents.json`);
   } catch (err) {
     console.error("[config] failed to parse agents.json:", err);
   }
 }
 
-const agentConfigs = new Map<string, AgentConfig>();
-for (const ac of agentsConfig.agents || []) {
-  agentConfigs.set(ac.id, ac);
+export const agentConfigs = new Map<string, AgentConfig>();
+const agentsSourceDir = path.join(process.cwd(), "src", "agents");
+if (fs.existsSync(agentsSourceDir)) {
+  const entries = fs.readdirSync(agentsSourceDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const configFilePath = path.join(agentsSourceDir, entry.name, "config.json");
+    if (!fs.existsSync(configFilePath)) continue;
+    try {
+      const raw = JSON.parse(fs.readFileSync(configFilePath, "utf-8"));
+      agentConfigs.set(entry.name, { ...raw, id: entry.name });
+    } catch (err) {
+      console.error(`[config] failed to load agent config ${configFilePath}:`, err);
+    }
+  }
+  console.log(`[config] discovered ${agentConfigs.size} agent(s) from src/agents/*/config.json`);
 }
 
 const mimoModel: Model<any> = {
@@ -73,6 +130,26 @@ const mimoModel: Model<any> = {
   reasoning: true,
   input: ["text", "image"],
   cost: { input: 0.7, output: 2.1, cacheRead: 0.14, cacheWrite: 0 },
+  contextWindow: 1000000,
+  maxTokens: 131072,
+  compat: {
+    thinkingFormat: "deepseek",
+    requiresReasoningContentOnAssistantMessages: true,
+    supportsDeveloperRole: false,
+    supportsStore: false,
+    supportsReasoningEffort: false,
+  },
+};
+
+const mimoProModel: Model<any> = {
+  id: "mimo-v2.5-pro",
+  name: "MiMo V2.5 Pro",
+  api: "openai-completions",
+  provider: "xiaomi",
+  baseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
+  reasoning: true,
+  input: ["text"],
+  cost: { input: 1.4, output: 4.2, cacheRead: 0.28, cacheWrite: 0 },
   contextWindow: 1000000,
   maxTokens: 131072,
   compat: {
@@ -97,8 +174,19 @@ const deepseekModel: Model<any> = {
   maxTokens: 8192,
 };
 
-const DEFAULT_SYSTEM_PROMPT =
-  "你是 Pilot Agent，一个智能编程助手。你可以读写文件、执行命令来帮助用户。请用中文回答。修改文件前先读取，使用 edit 做精确修改。如果 claude_code 工具可用，复杂的多文件编辑、调试或重构任务可以委托给 Claude Code 处理。";
+const minimaxModel: Model<any> = {
+  id: "MiniMax-M3",
+  name: "MiniMax M3",
+  api: "openai-completions",
+  provider: "minimax",
+  baseUrl: "https://api.minimaxi.com/v1",
+  reasoning: true,
+  input: ["text"],
+  cost: { input: 1.0, output: 4.0, cacheRead: 0.1, cacheWrite: 0 },
+  contextWindow: 1000000,
+  maxTokens: 131072,
+};
+
 
 // --- SessionLane: per-session serial queue ---
 
@@ -159,37 +247,56 @@ function getAgent(sessionKey: string, userId: number, modelId?: string, agentId?
   }
 
   const ac = agentConfigs.get(agentId || "main");
-  const resolvedModelId = modelId || ac?.model || "xiaomi/mimo-v2.5";
-  const systemPrompt = ac?.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+  const resolvedModelId = modelId || ac?.model || "xiaomi/mimo-v2.5-pro";
   const model = resolveModel(resolvedModelId);
   if (!model) throw new Error(`Unknown model: ${resolvedModelId}`);
 
   const resolvedAgentId = agentId || "main";
   const sk = sessionKey;
+  const delegateFn: DelegateFn | undefined = (ac?.subAgents && ac.subAgents.length > 0)
+    ? async (agentId2: string, task2: string, context2?: string) => {
+        return runSubAgent(agentId2, task2, context2, sk, userId);
+      }
+    : undefined;
+
+  // Two-level workspace: agent-level (shared) + user-level (per-user)
+  const agentDir = getAgentDir(resolvedAgentId);
+  const userDir = getUserWorkspaceDir(userId, resolvedAgentId);
+  ensureAgentBootstrapFiles(agentDir, resolvedAgentId);
+  ensureUserBootstrapFiles(userDir);
+
   const { tools: userTools, dispose: disposeTools } = createUserTools(
-    getUserWorkspaceDir(userId, resolvedAgentId),
+    userDir,
     ac?.tools,
     () => currentImages.get(sk),
+    delegateFn,
+    ac?.subAgents,
+    resolvedAgentId,
   );
 
-  const skillSummary = buildSkillSummary();
+  const skillSummary = buildSkillSummary(resolvedAgentId);
 
-  const workspaceDir = getUserWorkspaceDir(userId, resolvedAgentId);
-  const memoryContext = buildMemoryContext(workspaceDir);
+  // Agent-level bootstrap (AGENTS.md + SOUL.md + IDENTITY.md + TOOLS.md)
+  const agentBootstrap = loadAgentBootstrap(agentDir, resolvedAgentId);
+  // User-level bootstrap (USER.md)
+  const userBootstrap = loadUserBootstrap(userDir);
+  const userSection = userBootstrap ? `\n\n${userBootstrap}` : "";
+
+  const memoryContext = buildMemoryContext(userDir);
   const memorySection = memoryContext
     ? `\n\n# 记忆系统\n以下是你的持久化记忆，跨会话保留。回答前先检查记忆中是否有相关信息：\n\n${memoryContext}`
     : "";
 
-  const fullSystemPrompt = systemPrompt + skillSummary + memorySection;
+  const fullSystemPrompt = agentBootstrap + userSection + skillSummary + memorySection;
 
   const agent = new Agent({
     initialState: {
       systemPrompt: fullSystemPrompt,
       model,
       tools: userTools,
-      thinkingLevel: resolvedModelId.includes("mimo") ? "medium" : "off",
+      thinkingLevel: (resolvedModelId.includes("mimo") || resolvedModelId.includes("minimax")) ? "medium" : "off",
     },
-    streamFn: streamSimpleOpenAICompletions as any,
+    streamFn: streamWithFallback as any,
     onPayload: (payload) => {
       (payload as any).max_tokens = model.maxTokens;
       return payload;
@@ -197,6 +304,7 @@ function getAgent(sessionKey: string, userId: number, modelId?: string, agentId?
     getApiKey: (provider: string) => {
       if (provider === "xiaomi") return process.env.XIAOMI_API_KEY;
       if (provider === "deepseek") return process.env.DEEPSEEK_API_KEY;
+      if (provider === "minimax") return process.env.MINIMAX_API_KEY;
       return undefined;
     },
     convertToLlm: (messages) => messages as any[],
@@ -218,7 +326,7 @@ function getAgent(sessionKey: string, userId: number, modelId?: string, agentId?
             noteLines.push(`${role}: ${text.length > 300 ? text.slice(0, 300) + "..." : text}`);
           }
         }
-        appendDailyNote(workspaceDir, noteLines.join("\n"));
+        appendDailyNote(userDir, noteLines.join("\n"));
         console.log(`[memory] flushed ${oldMessages.length} old messages to daily note before compaction`);
       } catch (err) {
         console.error("[memory] compaction flush failed:", err);
@@ -254,12 +362,20 @@ function getAgent(sessionKey: string, userId: number, modelId?: string, agentId?
 
 function resolveModel(modelId: string): Model<any> | null {
   if (modelId === "xiaomi/mimo-v2.5" || modelId === "mimo-v2.5") {
-    const cfg = agentsConfig.models?.["xiaomi/mimo-v2.5"];
+    const cfg = modelsConfig.models?.["xiaomi/mimo-v2.5-pro"];
     const inputModalities = (cfg?.modalities?.input || ["text"]) as ("text" | "image")[];
     return { ...mimoModel, input: inputModalities };
   }
+  if (modelId === "xiaomi/mimo-v2.5-pro" || modelId === "mimo-v2.5-pro") {
+    const cfg = modelsConfig.models?.["xiaomi/mimo-v2.5-pro"];
+    const inputModalities = (cfg?.modalities?.input || ["text"]) as ("text" | "image")[];
+    return { ...mimoProModel, input: inputModalities };
+  }
   if (modelId === "deepseek/deepseek-v4-flash" || modelId === "deepseek-v4-flash") {
     return deepseekModel;
+  }
+  if (modelId === "minimax/m3" || modelId === "MiniMax-M3") {
+    return minimaxModel;
   }
   return null;
 }
@@ -267,6 +383,7 @@ function resolveModel(modelId: string): Model<any> | null {
 function getApiKeyForProvider(provider: string): string | undefined {
   if (provider === "xiaomi") return process.env.XIAOMI_API_KEY;
   if (provider === "deepseek") return process.env.DEEPSEEK_API_KEY;
+  if (provider === "minimax") return process.env.MINIMAX_API_KEY;
   return undefined;
 }
 
@@ -274,7 +391,8 @@ const currentRunIds = new Map<string, string>();
 
 async function doRunPromptWithRunId(runId: string, message: string, sessionKey: string, userId: number, agentId?: string, images?: ImageContent[], videos?: Array<{ data: string; mimeType: string }>, audios?: Array<{ data: string; mimeType: string }>): Promise<string> {
   const entry = agents.get(sessionKey);
-  const modelId = entry?.modelId || "xiaomi/mimo-v2.5";
+  const ac = agentConfigs.get(agentId || "main");
+  const modelId = entry?.modelId || ac?.model || "xiaomi/mimo-v2.5-pro";
   const agent = getAgent(sessionKey, userId, modelId, agentId);
   currentRunIds.set(sessionKey, runId);
   const startTime = Date.now();
@@ -340,12 +458,18 @@ async function doRunPromptWithRunId(runId: string, message: string, sessionKey: 
   }
 
   setSessionStatus(sessionKey, "generating", { runId });
+  startAgentWork(sessionKey, agentId || "main", message.slice(0, 200));
 
   setAcpSseContext(sessionKey, runId);
 
+  // Persist user message immediately so it survives page refresh mid-run
+  appendContext(sessionKey, [{ role: "user", content: message }], runId);
+
+  // Normal flow: main agent processes the message
   try {
     await agent.prompt(effectiveMessage, effectiveImages);
     setSessionStatus(sessionKey, "completed", { runId });
+    endAgentWork(sessionKey, agentId || "main", "completed");
   } catch (err: any) {
     const errMsg = err?.message || "";
     console.error(`[agent] prompt failed: ${errMsg}`, err?.stack || "");
@@ -356,8 +480,15 @@ async function doRunPromptWithRunId(runId: string, message: string, sessionKey: 
       sessionKey,
       payload: { error: errMsg || "Agent error" },
     });
+    publish(sessionKey, {
+      eventId: "",
+      kind: "run.end",
+      runId,
+      sessionKey,
+    });
     errorMsg = errMsg || "Agent error";
     setSessionStatus(sessionKey, "error", { runId, error: errorMsg });
+    endAgentWork(sessionKey, agentId || "main", "error", errMsg);
   } finally {
     clearAcpSseContext();
     currentRunIds.delete(sessionKey);
@@ -367,10 +498,11 @@ async function doRunPromptWithRunId(runId: string, message: string, sessionKey: 
   }
 
   const activeAgent = agents.get(sessionKey)?.agent || agent;
+
   const lastAssistant = activeAgent.state.messages
     ?.filter((m: any) => m.role === "assistant")
     .pop();
-  const toSave: ContextMessage[] = [{ role: "user", content: message }];
+  const toSave: ContextMessage[] = [];
   const resolvedModelName = model?.name || modelId;
   if (lastAssistant) {
     const text = typeof lastAssistant.content === "string"
@@ -378,14 +510,13 @@ async function doRunPromptWithRunId(runId: string, message: string, sessionKey: 
       : (lastAssistant.content as any[])?.filter((b: any) => b.type === "text").map((b: any) => b.text).join("") || "";
     if (text) toSave.push({ role: "assistant", content: text, model: resolvedModelName });
   }
-  appendContext(sessionKey, toSave, runId);
+  if (toSave.length > 0) {
+    appendContext(sessionKey, toSave, runId);
+  }
 
-  if (toSave.length > 1 && toSave[1]?.role === "assistant") {
-    const firstUserMsg = loadContext(sessionKey).find((m) => m.role === "user");
-    if (firstUserMsg && firstUserMsg === toSave[0]) {
-      const title = toSave[1].content.slice(0, 50).replace(/\n/g, " ");
-      updateSessionTitle(sessionKey, title);
-    }
+  const assistantMsg = toSave.find((m) => m.role === "assistant");
+  if (assistantMsg) {
+    updateSessionTitle(sessionKey, assistantMsg.content.slice(0, 50).replace(/\n/g, " "));
   }
 
   appendAuditLog({
@@ -397,6 +528,8 @@ async function doRunPromptWithRunId(runId: string, message: string, sessionKey: 
     durationMs: Date.now() - startTime,
     error: errorMsg || undefined,
   });
+
+  checkDelayedRestart();
 
   return runId;
 }
@@ -423,6 +556,15 @@ export function runPrompt(message: string, sessionKey: string, userId: number, a
   return Promise.resolve(runId);
 }
 
+export function steerMessage(sessionKey: string, message: string): boolean {
+  const entry = agents.get(sessionKey);
+  if (!entry) return false;
+  if (!currentRunIds.has(sessionKey)) return false;
+  entry.agent.steer({ role: "user", content: message, timestamp: Date.now() });
+  console.log(`[steer] appended message to active run: ${message.slice(0, 80)}...`);
+  return true;
+}
+
 export function abort(sessionKey: string): void {
   const entry = agents.get(sessionKey);
   if (!entry) return;
@@ -445,21 +587,128 @@ export function destroyAgent(sessionKey: string): void {
   agents.delete(sessionKey);
   currentRunIds.delete(sessionKey);
   lanes.delete(sessionKey);
+  cleanupSessionTracker(sessionKey);
+}
+
+// --- Sub-agent execution ---
+
+export type DelegateFn = (agentId: string, task: string, context?: string) => Promise<string>;
+
+export async function runSubAgent(
+  agentId: string,
+  task: string,
+  context: string | undefined,
+  parentSessionKey: string,
+  userId: number,
+): Promise<string> {
+  const ac = agentConfigs.get(agentId);
+  if (!ac) throw new Error(`Unknown sub-agent: ${agentId}`);
+
+  // dev agent: handled by delegate tool via claude_code ACP, not here
+  if (agentId === "dev") {
+    throw new Error("dev agent should be handled by the delegate tool's claude_code ACP path, not runSubAgent");
+  }
+
+  const agentDir = getAgentDir(agentId);
+  const userDir = getUserWorkspaceDir(userId, agentId);
+  ensureAgentBootstrapFiles(agentDir, agentId);
+  ensureUserBootstrapFiles(userDir);
+  const modelId = ac.model || "xiaomi/mimo-v2.5-pro";
+  const model = resolveModel(modelId);
+  if (!model) throw new Error(`Cannot resolve model for sub-agent ${agentId}`);
+
+  const { tools: subTools, dispose: disposeSubTools } = createUserTools(
+    userDir,
+    ac.tools,
+    undefined,
+    undefined,
+    undefined,
+    agentId,
+  );
+
+  const skillSummary = buildSkillSummary(agentId);
+  const memoryContext = buildMemoryContext(userDir);
+  const memorySection = memoryContext
+    ? `\n\n# 记忆系统\n以下是你的持久化记忆，跨会话保留。\n\n${memoryContext}`
+    : "";
+
+  const subBootstrap = loadAgentBootstrap(agentDir, agentId);
+
+  const fullSystemPrompt = subBootstrap + skillSummary + memorySection;
+  const effectiveTask = context ? `${task}\n\n## 附加上下文\n${context}` : task;
+
+  const subAgent = new Agent({
+    initialState: {
+      systemPrompt: fullSystemPrompt,
+      model,
+      tools: subTools,
+      thinkingLevel: (modelId.includes("mimo") || modelId.includes("minimax")) ? "medium" : "off",
+    },
+    streamFn: streamWithFallback as any,
+    onPayload: (payload) => {
+      (payload as any).max_tokens = model.maxTokens;
+      return payload;
+    },
+    getApiKey: (provider: string) => {
+      if (provider === "xiaomi") return process.env.XIAOMI_API_KEY;
+      if (provider === "deepseek") return process.env.DEEPSEEK_API_KEY;
+      if (provider === "minimax") return process.env.MINIMAX_API_KEY;
+      return undefined;
+    },
+    convertToLlm: (messages) => messages as any[],
+    toolExecution: "sequential",
+  });
+
+  console.log(`[sub-agent] starting ${agentId} for task: ${task.slice(0, 100)}...`);
+
+  const subRunId = `sub-${agentId}-${Date.now()}`;
+  setAcpSseContext(parentSessionKey, subRunId);
+  startAgentWork(parentSessionKey, agentId, task.slice(0, 200));
+
+  try {
+    await subAgent.prompt(effectiveTask);
+
+    const lastAssistant = subAgent.state.messages
+      ?.filter((m: any) => m.role === "assistant")
+      .pop();
+
+    if (!lastAssistant) return "(子 agent 完成但没有输出)";
+
+    const text = typeof lastAssistant.content === "string"
+      ? lastAssistant.content
+      : (lastAssistant.content as any[])
+          ?.filter((b: any) => b.type === "text")
+          .map((b: any) => b.text)
+          .join("") || "";
+
+    console.log(`[sub-agent] ${agentId} completed, output length: ${text.length}`);
+    endAgentWork(parentSessionKey, agentId, "completed");
+    return text || "(子 agent 完成但没有文本输出)";
+  } catch (err: any) {
+    endAgentWork(parentSessionKey, agentId, "error", err?.message || String(err));
+    throw err;
+  } finally {
+    await disposeSubTools();
+    clearAcpSseContext();
+  }
 }
 
 // --- Model switching ---
 
 const modelRegistry: Record<string, { name: string; alias: string }> = {
-  "xiaomi/mimo-v2.5": { name: "MiMo V2.5", alias: "MiMo" },
+  "xiaomi/mimo-v2.5-pro": { name: "MiMo V2.5 Pro", alias: "MiMo" },
   "deepseek/deepseek-v4-flash": { name: "DeepSeek V4 Flash", alias: "DeepSeek" },
+  "minimax/m3": { name: "MiniMax M3", alias: "MiniMax" },
 };
 
 export function getAgentList(allowedIds?: string[]) {
-  const all = Array.from(agentConfigs.values()).map((ac) => ({
-    id: ac.id,
-    name: ac.name,
-    tools: ac.tools || [],
-  }));
+  const all = Array.from(agentConfigs.values())
+    .filter((ac) => !ac.hidden)
+    .map((ac) => ({
+      id: ac.id,
+      name: ac.name,
+      tools: ac.tools || [],
+    }));
   if (!allowedIds) return all;
   return all.filter((a) => allowedIds.includes(a.id));
 }

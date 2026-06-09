@@ -11,6 +11,7 @@ import {
   API_UPLOAD,
   API_SESSION_NEW,
   API_CHAT_V2,
+  API_CHAT_APPEND,
 } from '../constants/index.js'
 import { extractText, detectMediaUrls } from '../utils/format.js'
 import {
@@ -159,21 +160,36 @@ export function useSend(ctx, streamingApi) {
           }
         })
 
-      console.debug('[useChat] filtered messages:', historyMessages.length)
+      console.log('[useChat] filtered messages:', historyMessages.length)
+      // DEBUG: log media.files for assistant messages
+      for (const m of historyMessages) {
+        if (m.role === 'assistant' && m.media?.files?.length > 0) {
+          console.log('[useChat] DOWNLOAD FILES detected:', m.media.files)
+        }
+      }
 
       const historyRunIds = new Set(historyMessages.map(m => m.runId).filter(Boolean))
+      const historyContents = new Set(historyMessages.map(m => m.content?.trim()).filter(Boolean))
 
+      // Preserve streaming messages whose runId is not yet in history
       const streamingMessages = messages.value.filter((m) => m.isStreaming)
-
-      const preservedMessages = streamingMessages.filter((m) => {
+      const preservedStreaming = streamingMessages.filter((m) => {
         if (m.runId && historyRunIds.has(m.runId)) return false
         return true
       })
 
+      // Preserve user messages whose content is not yet in history (not persisted by backend yet)
+      const localUserMessages = messages.value.filter(
+        (m) => m.role === 'user' && !m.isStreaming && m.content?.trim() && !historyContents.has(m.content.trim())
+      )
+
       const finalMessages = [...historyMessages]
-      for (const pm of preservedMessages) {
+      for (const pm of preservedStreaming) {
         if (pm.runId && historyRunIds.has(pm.runId)) continue
         finalMessages.push(pm)
+      }
+      for (const um of localUserMessages) {
+        finalMessages.push(um)
       }
 
       messages.value = finalMessages
@@ -382,8 +398,8 @@ export function useSend(ctx, streamingApi) {
       return
     }
 
-    if (ctx.state.sendingLock || ctx.loading.value) {
-      showNotify({ type: 'warning', message: '上一条消息仍在生成，请稍候或先停止' })
+    if (ctx.state.sendingLock) {
+      showNotify({ type: 'warning', message: '消息正在发送中，请稍候' })
       return
     }
     ctx.state.sendingLock = true
@@ -445,6 +461,35 @@ export function useSend(ctx, streamingApi) {
       inputText.value = ''
       attachments.value = []
       messages.value.push({ id: Date.now(), role: 'user', content: fullMessage })
+
+      // -- Steer mode: append message to active run --
+      if (ctx.loading.value && ctx.state.currentRunId && ctx.getStreamMode() === 'events') {
+        try {
+          const resp = await fetch(`${API_BASE}${API_CHAT_APPEND}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${ctx.token.value}`,
+            },
+            body: JSON.stringify({
+              message: fullMessage,
+              session_key: ctx.sessionKey.value,
+            }),
+          })
+          if (resp.ok) {
+            const data = await resp.json()
+            if (data.mode === 'steered') {
+              console.debug('[useChat] message steered to active run')
+              ctx.scrollToBottom()
+              return
+            }
+          }
+          // Steer failed, fall through to normal send
+          console.warn('[useChat] steer failed, falling back to normal send')
+        } catch (err) {
+          console.warn('[useChat] steer request failed:', err)
+        }
+      }
 
       // -- Phase 2: persistent SSE mode (fire-and-forget) --
       if (ctx.getStreamMode() === 'events') {

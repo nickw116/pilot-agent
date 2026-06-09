@@ -1,27 +1,42 @@
 /**
- * 全局设计令牌（Design Tokens）
+ * Minimal White-Gray Design Tokens
  *
- * 命名规范：
- *   --color-*      颜色
- *   --radius-*     圆角
- *   --shadow-*     阴影
+ * Color scheme: Clean white base with gray layers, indigo accent
+ * Style: Modern minimal, eye-friendly, subtle depth
+ * Naming: --color-*, --radius-*, --shadow-*
  */
 :root {
-  /* ── Color: Primary ── */
-  --color-primary: #007AFF;
-  --color-primary-light: #3395FF;
-  --color-primary-dark: #0066CC;
+  /* ── Color: Primary (Indigo) ── */
+  --color-primary: #6366F1;
+  --color-primary-light: #818CF8;
+  --color-primary-dark: #4F46E5;
+  --color-primary-rgb: 99, 102, 241;
+
+  /* ── Color: Accent (Soft Violet) ── */
+  --color-accent: #8B5CF6;
+  --color-accent-light: #A78BFA;
+  --color-accent-rgb: 139, 92, 246;
 
   /* ── Color: Background ── */
-  --color-bg: #FFFFFF;
-  --color-bg-secondary: #F4F5F7;
+  --color-bg: #FAFBFC;
+  --color-bg-secondary: #F3F4F6;
+  --color-bg-tertiary: #E5E7EB;
+  --color-bg-glass: rgba(255, 255, 255, 0.7);
+  --color-bg-glass-hover: rgba(255, 255, 255, 0.85);
 
   /* ── Color: Text ── */
-  --color-text: #1F1F1F;
-  --color-text-secondary: #8E8E8E;
+  --color-text: #111827;
+  --color-text-secondary: #6B7280;
+  --color-text-muted: #9CA3AF;
 
   /* ── Color: Border ── */
-  --color-border: #E5E5E5;
+  --color-border: rgba(0, 0, 0, 0.06);
+  --color-border-glow: rgba(99, 102, 241, 0.15);
+
+  /* ── Color: Status ── */
+  --color-success: #10B981;
+  --color-warning: #F59E0B;
+  --color-danger: #EF4444;
 
   /* ── Radius ── */
   --radius-sm: 8px;
@@ -29,7 +44,19 @@
   --radius-lg: 28px;
 
   /* ── Shadow ── */
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.05);
-  --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.08);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.05), 0 2px 4px rgba(0, 0, 0, 0.03);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.06), 0 4px 8px rgba(0, 0, 0, 0.04);
+  --shadow-glow: 0 0 20px rgba(99, 102, 241, 0.08);
+  --shadow-glow-strong: 0 0 30px rgba(99, 102, 241, 0.12);
+
+  /* ── Transitions ── */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.25s ease;
+  --transition-slow: 0.4s ease;
+
+  /* ── Color: Code Block (Dark) ── */
+  --color-code-bg: #1e1e2e;
+  --color-code-text: #e2e8f0;
+  --color-code-border: rgba(255, 255, 255, 0.08);
 }

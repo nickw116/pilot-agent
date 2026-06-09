@@ -1,3 +1,4 @@
+import { showNotify } from 'vant'
 import {
   API_BASE,
   API_CHAT,
@@ -390,6 +391,7 @@ export function useStreaming(ctx) {
       errMsg.content = `⚠️ 模型错误：${errorText}`
       errMsg.isStreaming = false
       messages.value.push(errMsg)
+      showNotify({ type: 'warning', message: `模型错误：${errorText}` })
       console.error('[useChat] run.error:', errorText)
     }
     ctx.state.currentRunId = null

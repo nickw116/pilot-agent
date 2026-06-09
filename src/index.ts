@@ -13,7 +13,7 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import multer from "multer";
-import { registerSubscriber, unregisterSubscriber, publish } from "./sse.js";
+import { registerSubscriber, unregisterSubscriber, publish, replayBuffer } from "./sse.js";
 import * as agentModule from "./agent.js";
 import * as authMod from "./auth.js";
 import * as sessionMod from "./session.js";
@@ -22,6 +22,7 @@ import { checkRateLimit } from "./rate-limit.js";
 import { transcribeAudio, describeVideo } from "./media-provider.js";
 import { appendDailyNote } from "./memory.js";
 import { getUserWorkspaceDir } from "./tools.js";
+import { getAgentWorkSnapshot } from "./agent-tracker.js";
 
 const PORT = parseInt(process.env.PORT || "8081", 10);
 
@@ -39,7 +40,7 @@ app.use((_req, res, next) => {
 
 // --- Auth middleware ---
 function auth(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const token = req.headers.authorization?.replace("Bearer ", "");
+  const token = req.headers.authorization?.replace("Bearer ", "") || (req.query.token as string);
   if (!token) return res.status(401).json({ detail: "Unauthorized" });
 
   const user = authMod.validateToken(token);
@@ -85,33 +86,18 @@ app.post("/api/change-password", auth, (req, res) => {
   res.json({ ok: true });
 });
 
-app.put("/api/user/preferred-agent", auth, (req, res) => {
-  const user = (req as any).user;
-  const { agent_id } = req.body || {};
-  if (!agent_id || typeof agent_id !== "string") {
-    return res.status(400).json({ detail: "Missing agent_id" });
-  }
-  const allowed = authMod.getAllowedAgents(user.allowedAgent);
-  if (!allowed.includes(agent_id)) {
-    return res.status(403).json({ detail: "No permission for this agent" });
-  }
-  authMod.setPreferredAgent(user.userId, agent_id);
-  res.json({ ok: true, preferred_agent: agent_id });
-});
 
 // --- Session routes ---
 
 app.get("/api/agents", auth, (req, res) => {
   const user = (req as any).user;
-  const allowedIds = authMod.getAllowedAgents(user.allowedAgent);
+  const allowedIds = authMod.getAllowedAgents(user.allowedAgent, user.role);
   res.json({ agents: agentModule.getAgentList(allowedIds) });
 });
 
 app.get("/api/session", auth, (req, res) => {
   const user = (req as any).user;
-  const agentId = user.preferredAgent && authMod.getAllowedAgents(user.allowedAgent).includes(user.preferredAgent)
-    ? user.preferredAgent
-    : user.allowedAgent;
+  const agentId = user.role === "admin" ? "main" : "user";
   const s = sessionMod.getOrCreateActiveSession(user.userId, user.username, agentId);
   res.json({ sessionKey: s.session_key });
 });
@@ -131,7 +117,7 @@ app.get("/api/sessions", auth, (req, res) => {
 
 app.get("/api/admin/sessions", auth, (req, res) => {
   const user = (req as any).user;
-  if (user.allowedAgent !== "main" && user.allowedAgent !== "dev") {
+  if (user.role !== "admin") {
     return res.status(403).json({ detail: "Forbidden: insufficient privileges" });
   }
   const agentId = req.query.agent_id as string | undefined;
@@ -155,18 +141,33 @@ app.get("/api/admin/sessions", auth, (req, res) => {
   res.json({ sessions });
 });
 
-function checkAgentPermission(user: any, agentId: string): boolean {
-  const allowedIds = authMod.getAllowedAgents(user.allowedAgent);
-  return allowedIds.includes(agentId);
+app.delete("/api/session/:sessionKey", auth, (req, res) => {
+  const user = (req as any).user;
+  const sessionKey = req.params.sessionKey;
+  if (!sessionKey || typeof sessionKey !== "string") {
+    return res.status(400).json({ detail: "Invalid session key" });
+  }
+  const session = sessionMod.getSession(sessionKey);
+  if (!session) {
+    return res.status(404).json({ detail: "Session not found" });
+  }
+  if (user.role !== "admin" && session.user_id !== user.userId) {
+    return res.status(403).json({ detail: "Forbidden" });
+  }
+  const deleted = sessionMod.deleteSession(user.userId, sessionKey);
+  if (!deleted) {
+    return res.status(404).json({ detail: "Session not found" });
+  }
+  res.json({ ok: true });
+});
+
+function resolveAgentId(user: any): string {
+  return user.role === "admin" ? "main" : "user";
 }
 
 app.post("/api/session/new", auth, (req, res) => {
   const user = (req as any).user;
-  const { agent_id } = req.body || {};
-  const aid = agent_id || "main";
-  if (!checkAgentPermission(user, aid)) {
-    return res.status(403).json({ detail: "No permission for this agent" });
-  }
+  const aid = resolveAgentId(user);
 
   // Memory flush: save old session's recent context before creating a new one
   try {
@@ -193,11 +194,7 @@ app.post("/api/session/new", auth, (req, res) => {
 
 app.post("/api/sessions", auth, (req, res) => {
   const user = (req as any).user;
-  const { agent_id } = req.body || {};
-  const aid = agent_id || "main";
-  if (!checkAgentPermission(user, aid)) {
-    return res.status(403).json({ detail: "No permission for this agent" });
-  }
+  const aid = resolveAgentId(user);
   const s = sessionMod.createSession(user.userId, user.username, aid);
   res.json({ sessionKey: s.session_key });
 });
@@ -235,12 +232,19 @@ app.post("/api/chat/v2", auth, async (req, res) => {
   console.log(`[chat/v2] message=${(message || "").slice(0, 80)} images=${images?.length || 0} videos=${videos?.length || 0} audios=${audios?.length || 0} session=${session_key}`);
   if (!message) return res.status(400).json({ detail: "No message" });
 
-  // Resolve session
-  const s = session_key
-    ? sessionMod.switchSession(user.userId, session_key)
-    : sessionMod.getOrCreateActiveSession(user.userId, user.username);
-  const sk = s?.session_key || sessionMod.getOrCreateActiveSession(user.userId, user.username).session_key;
-  const agentId = s?.agent_id || "main";
+  // Resolve session — admin can send to any session (gateway mode)
+  let s: any = null;
+  if (session_key) {
+    s = sessionMod.switchSession(user.userId, session_key);
+    if (!s && user.role === "admin") {
+      s = sessionMod.getSession(session_key) || null;
+    }
+  }
+  if (!s) {
+    s = sessionMod.getOrCreateActiveSession(user.userId, user.username);
+  }
+  const sk = s.session_key;
+  const agentId = s.agent_id || resolveAgentId(user);
 
   const imageContent = Array.isArray(images) && images.length > 0
     ? images.map((img: any) => ({
@@ -272,11 +276,18 @@ app.post("/api/chat", auth, async (req, res) => {
   console.log(`[chat] message=${(message || "").slice(0, 80)} images=${images?.length || 0} videos=${videos?.length || 0} audios=${audios?.length || 0} session=${session_key}`);
   if (!message) return res.status(400).json({ detail: "No message" });
 
-  const s = session_key
-    ? sessionMod.switchSession(user.userId, session_key)
-    : sessionMod.getOrCreateActiveSession(user.userId, user.username);
-  const sk = s?.session_key || sessionMod.getOrCreateActiveSession(user.userId, user.username).session_key;
-  const agentId = s?.agent_id || "main";
+  let s: any = null;
+  if (session_key) {
+    s = sessionMod.switchSession(user.userId, session_key);
+    if (!s && user.role === "admin") {
+      s = sessionMod.getSession(session_key) || null;
+    }
+  }
+  if (!s) {
+    s = sessionMod.getOrCreateActiveSession(user.userId, user.username);
+  }
+  const sk = s.session_key;
+  const agentId = s.agent_id || resolveAgentId(user);
 
   const imageContent = Array.isArray(images) && images.length > 0
     ? images.map((img: any) => ({
@@ -296,6 +307,21 @@ app.post("/api/chat", auth, async (req, res) => {
 
   const runId = await agentModule.runPrompt(message, sk, user.userId, agentId, imageContent, videoContent, audioContent);
   res.json({ ok: true, sessionKey: sk, runId });
+});
+
+app.post("/api/chat/append", auth, async (req, res) => {
+  const user = (req as any).user;
+  const { message, session_key } = req.body || {};
+  if (!message) return res.status(400).json({ detail: "No message" });
+  if (!session_key) return res.status(400).json({ detail: "No session_key" });
+
+  const steered = agentModule.steerMessage(session_key, message);
+  if (steered) {
+    console.log(`[chat/append] steered message to active run: ${message.slice(0, 80)}`);
+    res.json({ ok: true, mode: "steered" });
+  } else {
+    res.json({ ok: false, mode: "queued", detail: "No active run, message will be queued as a new run" });
+  }
 });
 
 app.post("/api/abort", auth, (req, res) => {
@@ -322,6 +348,13 @@ app.get("/api/events", auth, (req, res) => {
 
   const subscriberId = crypto.randomUUID();
   registerSubscriber(sessionKey, subscriberId, res as any);
+
+  // Replay buffered events for reconnecting clients
+  const lastEventId = (req.query.lastEventId as string) || null;
+  const buffered = replayBuffer(sessionKey, lastEventId);
+  for (const data of buffered) {
+    try { res.write(`data: ${data}\n\n`); } catch { break; }
+  }
 
   const sessionStatus = sessionMod.getSessionStatus(sessionKey);
   if (sessionStatus && sessionStatus.status === "generating" && sessionStatus.runId) {
@@ -363,6 +396,16 @@ app.get("/api/events", auth, (req, res) => {
     };
     try { res.write(`data: ${JSON.stringify(snapshotEvent)}\n\n`); } catch {}
   }
+
+  // Emit agent dashboard snapshot on SSE connect
+  const dashboardSnapshot = getAgentWorkSnapshot(sessionKey);
+  const dashboardEvent = {
+    eventId: `evt-dashboard-${Date.now()}`,
+    kind: "agent.work.snapshot",
+    sessionKey,
+    payload: { agents: dashboardSnapshot },
+  };
+  try { res.write(`data: ${JSON.stringify(dashboardEvent)}\n\n`); } catch {}
 
   const heartbeat = setInterval(() => {
     try { res.write(":\n\n"); } catch { clearInterval(heartbeat); }
@@ -419,11 +462,14 @@ app.get("/api/history", auth, (req, res) => {
 // --- Models ---
 
 app.get("/api/models", auth, (req, res) => {
+  const user = (req as any).user;
   const sessionKey = (req.query.sessionKey as string) || "";
   const current = sessionKey ? agentModule.getCurrentModel(sessionKey) : null;
+  const aid = resolveAgentId(user);
+  const agentDefault = agentModule.agentConfigs.get(aid)?.model || "";
   res.json({
     models: agentModule.getModelList(),
-    default: current || agentModule.getModelList()[0]?.id || "",
+    default: current || agentDefault || agentModule.getModelList()[0]?.id || "",
   });
 });
 
@@ -572,6 +618,10 @@ app.get("/api/local-file", auth, (req, res) => {
   if (!filePath) return res.status(400).json({ detail: "Missing path" });
   const resolved = path.resolve(filePath);
   if (!fs.existsSync(resolved)) return res.status(404).json({ detail: "Not found" });
+  if (req.query.download === "true") {
+    const filename = path.basename(resolved);
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+  }
   res.sendFile(resolved);
 });
 
@@ -584,6 +634,20 @@ app.get("/api/context/stats", auth, (req, res) => {
   res.json(getContextStats(sessionKey));
 });
 
+// --- Agent Dashboard ---
+
+app.get("/api/agent-dashboard", auth, (req, res) => {
+  const user = (req as any).user;
+  if (user.allowedAgent !== 'main' && user.allowedAgent !== 'dev') {
+    res.status(403).json({ error: 'Forbidden' });
+    return;
+  }
+  const sessionKey = (req.query.sessionKey as string) ||
+    sessionMod.getOrCreateActiveSession(user.userId, user.username).session_key;
+  const agents = getAgentWorkSnapshot(sessionKey);
+  res.json({ agents });
+});
+
 // --- Health ---
 
 app.get("/api/health", (_req, res) => {
@@ -594,9 +658,18 @@ app.get("/api/health", (_req, res) => {
 
 const FRONTEND_DIR = path.join(process.cwd(), "frontend", "dist");
 if (fs.existsSync(FRONTEND_DIR)) {
-  app.use(express.static(FRONTEND_DIR));
+  app.use(express.static(FRONTEND_DIR, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith(".html")) {
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        res.setHeader("Pragma", "no-cache");
+      }
+    },
+  }));
   app.get("*", (req, res, next) => {
     if (req.path.startsWith("/api")) return next();
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
     res.sendFile(path.join(FRONTEND_DIR, "index.html"));
   });
 }

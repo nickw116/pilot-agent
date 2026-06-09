@@ -17,6 +17,7 @@ export interface Skill {
 }
 
 const SKILLS_DIR = path.join(process.cwd(), "src", "skills");
+const AGENTS_DIR = path.join(process.cwd(), "src", "agents");
 
 function parseFrontmatter(raw: string): { meta: SkillMeta; body: string } {
   const meta: SkillMeta = {
@@ -74,36 +75,67 @@ function loadSkill(dir: string, id: string): Skill | null {
   return { id, dir, meta, body, references };
 }
 
-let cachedSkills: Skill[] | null = null;
-
-export function loadAllSkills(): Skill[] {
-  if (cachedSkills) return cachedSkills;
-
+function loadSkillsFromDir(baseDir: string): Skill[] {
   const skills: Skill[] = [];
-  if (!fs.existsSync(SKILLS_DIR)) {
-    cachedSkills = skills;
-    return skills;
-  }
-
-  const entries = fs.readdirSync(SKILLS_DIR, { withFileTypes: true });
+  if (!fs.existsSync(baseDir)) return skills;
+  const entries = fs.readdirSync(baseDir, { withFileTypes: true });
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
-    const skill = loadSkill(path.join(SKILLS_DIR, entry.name), entry.name);
+    const skill = loadSkill(path.join(baseDir, entry.name), entry.name);
     if (skill) skills.push(skill);
   }
-
-  console.log(`[skills] loaded ${skills.length} skills`);
-  cachedSkills = skills;
   return skills;
 }
 
-export function getSkillById(id: string): Skill | null {
-  return loadAllSkills().find((s) => s.id === id || s.meta.name === id) || null;
+// --- Global skills (cached) ---
+
+let cachedGlobalSkills: Skill[] | null = null;
+
+function loadGlobalSkills(): Skill[] {
+  if (cachedGlobalSkills) return cachedGlobalSkills;
+  const skills = loadSkillsFromDir(SKILLS_DIR);
+  console.log(`[skills] loaded ${skills.length} global skills`);
+  cachedGlobalSkills = skills;
+  return skills;
 }
 
-export function loadSkillContent(id: string): string {
-  const skill = getSkillById(id);
+// --- Agent private skills (not cached) ---
+
+function loadAgentSkills(agentId: string): Skill[] {
+  const agentSkillsDir = path.join(AGENTS_DIR, agentId, "skills");
+  const skills = loadSkillsFromDir(agentSkillsDir);
+  if (skills.length > 0) {
+    console.log(`[skills] loaded ${skills.length} private skills for agent '${agentId}'`);
+  }
+  return skills;
+}
+
+function mergeSkills(agentId?: string): Skill[] {
+  const global = loadGlobalSkills();
+  if (!agentId) return global;
+  const private_ = loadAgentSkills(agentId);
+  if (private_.length === 0) return global;
+  // Merge: private skills override global ones with the same id
+  const map = new Map<string, Skill>();
+  for (const s of global) map.set(s.id, s);
+  for (const s of private_) map.set(s.id, s);
+  return Array.from(map.values());
+}
+
+// --- Public API ---
+
+export function loadAllSkills(): Skill[] {
+  return loadGlobalSkills();
+}
+
+export function getSkillById(id: string, agentId?: string): Skill | null {
+  const skills = mergeSkills(agentId);
+  return skills.find((s) => s.id === id || s.meta.name === id) || null;
+}
+
+export function loadSkillContent(id: string, agentId?: string): string {
+  const skill = getSkillById(id, agentId);
   if (!skill) return `Skill "${id}" not found.`;
 
   const parts: string[] = [`# ${skill.meta.name || skill.id}\n`];
@@ -118,8 +150,8 @@ export function loadSkillContent(id: string): string {
   return parts.join("\n");
 }
 
-export function buildSkillSummary(): string {
-  const skills = loadAllSkills();
+export function buildSkillSummary(agentId?: string): string {
+  const skills = mergeSkills(agentId);
   if (skills.length === 0) return "";
 
   const lines: string[] = [

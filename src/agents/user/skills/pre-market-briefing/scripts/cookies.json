@@ -1,0 +1,14 @@
+[
+  {
+    "name": "session",
+    "value": "abc123",
+    "domain": "",
+    "path": "/"
+  },
+  {
+    "name": "token",
+    "value": "xyz789",
+    "domain": "",
+    "path": "/"
+  }
+]

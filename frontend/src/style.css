@@ -1,12 +1,12 @@
 :root {
-  --text: #1A1A1A;
-  --text-h: #1A1A1A;
-  --bg: #FFFFFF;
-  --border: #E5E5E5;
-  --code-bg: #F5F5F5;
-  --accent: #6366F1;
-  --accent-bg: rgba(99, 102, 241, 0.1);
-  --accent-border: rgba(99, 102, 241, 0.3);
+  --text: var(--color-text);
+  --text-h: var(--color-text);
+  --bg: var(--color-bg);
+  --border: var(--color-border);
+  --code-bg: var(--color-bg-secondary);
+  --accent: var(--color-primary);
+  --accent-bg: rgba(99, 102, 241, 0.06);
+  --accent-border: rgba(99, 102, 241, 0.15);
 
   --sans: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', Roboto, sans-serif;
   --heading: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Segoe UI', Roboto, sans-serif;
@@ -26,8 +26,109 @@
 html, body {
   height: 100%;
   margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
 }
 
 #app {
   height: 100%;
+  background: var(--color-bg);
+}
+
+/* ── Global Selection ── */
+::selection {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--color-primary-dark);
+}
+
+/* ── Scrollbar (Webkit) ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-text-muted);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-secondary);
+}
+
+/* ── Links ── */
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+a:hover {
+  color: var(--color-primary-dark);
+}
+
+/* ── Code Blocks ── */
+code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  background: var(--code-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+pre {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  overflow-x: auto;
+}
+
+pre code {
+  background: none;
+  padding: 0;
+}
+
+/* ── Dark Code Block (inside .code-block container) ── */
+.code-block pre {
+  background: var(--color-code-bg);
+  border: none;
+  border-radius: 0;
+}
+
+.code-block code {
+  background: none;
+  color: var(--color-code-text);
+}
+
+/* ── Focus States ── */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Vant Component Overrides (Light Theme) ── */
+:root {
+  /* Cell & Field */
+  --van-cell-background: var(--color-bg);
+  --van-cell-border-color: var(--color-border);
+  --van-field-label-color: var(--color-text-secondary);
+  --van-field-input-text-color: var(--color-text);
+  --van-field-placeholder-text-color: var(--color-text-muted);
+  --van-field-disabled-text-color: var(--color-text-muted);
+  
+  /* Button */
+  --van-button-primary-background: var(--color-primary);
+  --van-button-primary-border-color: var(--color-primary);
+  --van-button-border-radius: 14px;
+  
+  /* Cell Group */
+  --van-cell-group-background: transparent;
+  --van-cell-group-inset-border-radius: 16px;
+  --van-cell-group-inset-box-shadow: var(--shadow-sm);
 }

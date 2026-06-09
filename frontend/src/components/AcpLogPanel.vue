@@ -125,8 +125,8 @@ watch(
   margin-top: 8px;
   border-radius: 10px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: #1e1e2e;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
   font-family: 'SF Mono', 'Fira Code', 'Menlo', monospace;
   font-size: 12px;
   line-height: 1.5;
@@ -136,9 +136,9 @@ watch(
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  background: rgba(255, 255, 255, 0.06);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  color: #e2e8f0;
+  background: var(--color-bg-glass);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
   cursor: pointer;
   user-select: none;
 }
@@ -152,12 +152,12 @@ watch(
   font-weight: 500;
 }
 .acp-header-count {
-  color: #6b7280;
+  color: var(--color-text-muted);
   font-weight: 400;
   font-size: 11px;
 }
 .acp-header-toggle {
-  color: #6b7280;
+  color: var(--color-text-muted);
   font-size: 11px;
 }
 .collapsed .acp-header {
@@ -174,7 +174,7 @@ watch(
   align-items: baseline;
   gap: 6px;
   padding: 1px 10px;
-  color: #c9d1d9;
+  color: var(--color-text-secondary);
   white-space: nowrap;
 }
 .acp-line-text {
@@ -184,7 +184,7 @@ watch(
   text-overflow: ellipsis;
 }
 .acp-line-duration {
-  color: #6b7280;
+  color: var(--color-text-muted);
   font-size: 10px;
   flex-shrink: 0;
 }
@@ -195,46 +195,46 @@ watch(
   font-weight: 600;
 }
 .acp-tool_start .acp-line-prefix {
-  color: #58a6ff;
+  color: var(--color-primary);
 }
 .acp-tool_start .acp-line-text {
-  color: #79c0ff;
+  color: var(--color-primary-light);
 }
 .acp-tool_end .acp-line-prefix {
-  color: #3fb950;
+  color: var(--color-success);
 }
 .acp-tool_end .acp-line-text {
-  color: #8b949e;
+  color: var(--color-text-muted);
 }
 .acp-reasoning .acp-line-prefix {
-  color: #d2a8ff;
+  color: var(--color-accent);
 }
 .acp-reasoning .acp-line-text {
-  color: #bc8cff;
+  color: var(--color-accent-light);
 }
 .acp-text_delta .acp-line-prefix {
-  color: #e6edf3;
+  color: var(--color-text);
 }
 .acp-text_delta .acp-line-text {
-  color: #e6edf3;
+  color: var(--color-text);
 }
 .acp-step_start .acp-line-prefix {
-  color: #58a6ff;
+  color: var(--color-primary);
 }
 .acp-step_finish .acp-line-prefix {
-  color: #3fb950;
+  color: var(--color-success);
 }
 .acp-step_finish .acp-line-text {
-  color: #8b949e;
+  color: var(--color-text-muted);
 }
 .acp-log .acp-line-prefix {
-  color: #6b7280;
+  color: var(--color-text-muted);
 }
 .acp-log .acp-line-text {
-  color: #6b7280;
+  color: var(--color-text-muted);
 }
 .acp-waiting {
-  color: #6b7280;
+  color: var(--color-text-muted);
 }
 .acp-blink {
   animation: acp-blink 1s ease-in-out infinite;

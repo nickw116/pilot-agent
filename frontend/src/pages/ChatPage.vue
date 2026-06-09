@@ -4,10 +4,9 @@
       <template #left>
         <div class="nav-left-actions">
           <div
-            v-if="props.canAccessMonitor"
             class="nav-btn-wrapper nav-monitor-btn"
-            @click="$emit('open-monitor')"
-            title="全部会话"
+            @click="$emit('open-sessions')"
+            title="会话列表"
           >
             <van-icon name="bars" class="nav-action-icon" />
           </div>
@@ -16,7 +15,6 @@
       <template #title>
         <div class="nav-title-wrap">
           <span v-if="props.monitorMode" class="nav-title nav-title--monitor">MONITOR</span>
-          <span v-else class="nav-title">PILOT AGENT</span>
           <div class="nav-sub-row">
             <button
               v-if="props.currentModel"
@@ -32,6 +30,9 @@
       </template>
       <template #right>
         <div class="nav-right-actions">
+          <div v-if="props.canAccessMonitor" class="nav-btn-wrapper" @click="$emit('open-dashboard')" title="Agent 看板">
+            <van-icon name="cluster-o" class="nav-action-icon nav-action-icon--dashboard" />
+          </div>
           <div class="nav-btn-wrapper" @click="reloadPage" :class="{ 'is-loading': refreshing }">
             <van-icon :name="refreshing ? '' : 'replay'" class="nav-action-icon nav-action-icon--refresh">
               <template v-if="refreshing"><van-loading type="spinner" size="18" color="currentColor" /></template>
@@ -98,17 +99,37 @@
       @load-more="emit('load-more')"
     />
 
-    <!-- Monitor mode: read-only banner -->
-    <div v-if="props.monitorMode" class="monitor-banner">
-      <span class="monitor-banner__info">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-          <circle cx="12" cy="12" r="3"/>
-        </svg>
-        只读查看: {{ props.monitorUserInfo }}
-      </span>
-      <van-button size="small" type="primary" class="monitor-exit-btn" @click="$emit('exit-monitor')">退出</van-button>
-    </div>
+    <!-- Monitor mode: interactive banner + input -->
+    <template v-if="props.monitorMode">
+      <div class="monitor-banner monitor-banner--interactive">
+        <span class="monitor-banner__info">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+          代入会话: {{ props.monitorUserInfo }}
+        </span>
+        <button class="monitor-exit-btn" @click="emit('exit-monitor')">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <MessageInput
+        v-model="monitorInputText"
+        :loading="monitorLoading"
+        :uploading="false"
+        :upload-progress="0"
+        :attachments="[]"
+        @send="monitorSend"
+        @abort="monitorAbort"
+        @upload="() => {}"
+        @remove-attachment="() => {}"
+      />
+    </template>
 
     <!-- Normal mode: message input -->
     <MessageInput
@@ -166,10 +187,11 @@ const props = defineProps({
   monitorMessages: { type: Array, default: () => [] },
   monitorHistoryLoading: { type: Boolean, default: false },
   monitorUserInfo: { type: String, default: '' },
+  monitorLoading: { type: Boolean, default: false },
   canAccessMonitor: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['update:inputText', 'send', 'abort', 'upload', 'remove-attachment', 'open-settings', 'hot-refresh', 'switch-model', 'load-more', 'open-monitor', 'exit-monitor'])
+const emit = defineEmits(['update:inputText', 'send', 'abort', 'upload', 'remove-attachment', 'open-settings', 'hot-refresh', 'switch-model', 'load-more', 'open-sessions', 'open-monitor', 'open-dashboard', 'monitor-send', 'monitor-abort', 'exit-monitor'])
 
 // ── 模型选择器 ──
 const modelPickerVisible = ref(false)
@@ -186,7 +208,7 @@ const modelActions = computed(() => {
     return {
       name,
       value,
-      color: value === props.currentModel ? '#007AFF' : undefined,
+      color: value === props.currentModel ? 'var(--color-primary)' : undefined,
     }
   })
 })
@@ -214,7 +236,7 @@ watch(() => props.inputText, (v) => { inputText.value = v })
 watch(inputText, (v) => { emit('update:inputText', v) })
 
 function send(e) {
-  if (props.loading || props.uploading) {
+  if (props.uploading) {
     e?.preventDefault?.()
     return
   }
@@ -247,6 +269,20 @@ const suggestionCards = [
 function fillSuggestion(text) {
   inputText.value = text
 }
+
+// ── Monitor mode input ──
+const monitorInputText = ref('')
+
+function monitorSend(e) {
+  const text = monitorInputText.value.trim()
+  if (!text) return
+  monitorInputText.value = ''
+  emit('monitor-send', text)
+}
+
+function monitorAbort() {
+  emit('monitor-abort')
+}
 </script>
 
 <style>
@@ -259,18 +295,20 @@ function fillSuggestion(text) {
   bottom: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  background: var(--color-bg);
 }
 
 /* ── Nav Bar ── */
 .nav-bar {
-  background: #FFFFFF;
-  border-bottom: 1px solid #E5E5E5;
+  background: var(--color-bg-secondary) !important;
+  border-bottom: 1px solid var(--color-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 .nav-title {
   font-weight: 600;
   font-size: 16px;
-  color: #1F1F1F;
+  color: var(--color-text);
 }
 .nav-title-wrap {
   display: flex;
@@ -284,7 +322,7 @@ function fillSuggestion(text) {
 }
 .nav-model {
   font-size: 11px;
-  color: rgba(39, 39, 42, 0.6);
+  color: var(--color-text-muted);
   font-weight: 400;
   max-width: 120px;
   overflow: hidden;
@@ -297,13 +335,13 @@ function fillSuggestion(text) {
   gap: 3px;
   padding: 2px 8px;
   border-radius: 999px;
-  background: #fff;
-  border: 1px solid #E5E5E5;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-glow);
   font-size: 11px;
-  color: #007AFF;
+  color: var(--color-primary);
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--transition-normal);
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
   outline: none;
@@ -314,9 +352,10 @@ function fillSuggestion(text) {
   cursor: not-allowed;
 }
 .nav-model-btn:active:not(:disabled) {
-  background: rgba(0, 122, 255, 0.08);
-  border-color: rgba(0, 122, 255, 0.3);
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.2);
   transform: scale(0.96);
+  box-shadow: var(--shadow-glow);
 }
 .nav-model-text {
   overflow: hidden;
@@ -325,9 +364,9 @@ function fillSuggestion(text) {
 }
 .nav-model-arrow {
   font-size: 10px;
-  color: #007AFF;
+  color: var(--color-primary);
   flex-shrink: 0;
-  transition: transform 0.2s ease;
+  transition: transform var(--transition-normal);
 }
 .nav-model-btn:active:not(:disabled) .nav-model-arrow {
   transform: rotate(180deg);
@@ -342,8 +381,7 @@ function fillSuggestion(text) {
   overflow: hidden;
 }
 .nav-bar .van-nav-bar__title {
-  color: var(--text);
-  /* 恢复 Vant 默认 margin: 0 auto 居中能力，calc 限制最大宽度避免与左右重叠 */
+  color: var(--color-text);
   margin: 0 auto;
   max-width: calc(100% - 140px);
   padding: 0;
@@ -352,9 +390,8 @@ function fillSuggestion(text) {
   align-items: center;
   justify-content: center;
 }
-.nav-bar .van-nav-bar__arrow { color: var(--text); }
+.nav-bar .van-nav-bar__arrow { color: var(--color-text); }
 
-/* 阻止 Vant nav-bar haptics 反馈导致整体变透明（双亮问题根因） */
 .nav-bar .van-nav-bar__right.van-haptics-feedback:active,
 .nav-bar .van-nav-bar__left.van-haptics-feedback:active {
   opacity: 1 !important;
@@ -368,7 +405,6 @@ function fillSuggestion(text) {
   tap-highlight-color: transparent !important;
 }
 
-/* 右侧操作按钮 */
 .nav-right-actions {
   display: flex;
   align-items: center;
@@ -390,16 +426,24 @@ function fillSuggestion(text) {
   -webkit-user-select: none;
   user-select: none;
   cursor: pointer;
+  border-radius: 8px;
+  transition: background var(--transition-fast);
+}
+.nav-btn-wrapper:active {
+  background: rgba(99, 102, 241, 0.08);
 }
 .nav-action-icon {
   font-size: 20px;
-  color: var(--text);
+  color: var(--color-text-secondary);
   pointer-events: none;
   transition: transform 0.35s ease, color 0.2s ease;
 }
 @media (hover: hover) {
   .nav-btn-wrapper:hover .nav-action-icon {
-    color: var(--primary);
+    color: var(--color-primary);
+  }
+  .nav-btn-wrapper:hover {
+    background: rgba(99, 102, 241, 0.06);
   }
   .nav-btn-wrapper:hover .nav-action-icon--refresh {
     transform: rotate(-120deg);
@@ -410,7 +454,7 @@ function fillSuggestion(text) {
 }
 .nav-btn-wrapper:active .nav-action-icon--refresh {
   transform: scale(0.9) rotate(-60deg);
-  color: var(--primary);
+  color: var(--color-primary);
 }
 .nav-btn-wrapper.is-loading .nav-action-icon--refresh {
   animation: spin 0.8s linear infinite;
@@ -422,13 +466,16 @@ function fillSuggestion(text) {
 }
 .nav-btn-wrapper:active .nav-action-icon--setting {
   transform: scale(0.9) rotate(45deg);
-  color: var(--primary);
+  color: var(--color-primary);
+}
+.nav-btn-wrapper:active .nav-action-icon--dashboard {
+  transform: scale(0.9);
+  color: var(--color-primary);
 }
 
-/* 左侧菜单按钮 */
 .nav-menu-icon {
   font-size: 22px;
-  color: var(--text);
+  color: var(--color-text);
   cursor: pointer;
   padding: 8px;
   margin: -8px;
@@ -436,7 +483,6 @@ function fillSuggestion(text) {
 }
 .nav-menu-icon:active { transform: scale(0.9); }
 
-/* 左侧操作 */
 .nav-left-actions {
   display: flex;
   align-items: center;
@@ -461,14 +507,14 @@ function fillSuggestion(text) {
   -webkit-backdrop-filter: blur(12px);
 }
 .service-banner--down {
-  background: rgba(245, 158, 11, 0.12);
-  color: #B45309;
-  border-bottom: 1px solid rgba(245, 158, 11, 0.25);
+  background: rgba(255, 184, 0, 0.1);
+  color: var(--color-warning);
+  border-bottom: 1px solid rgba(255, 184, 0, 0.2);
 }
 .service-banner--recovered {
-  background: rgba(16, 185, 129, 0.12);
-  color: #047857;
-  border-bottom: 1px solid rgba(16, 185, 129, 0.25);
+  background: rgba(0, 229, 160, 0.1);
+  color: var(--color-success);
+  border-bottom: 1px solid rgba(0, 229, 160, 0.2);
 }
 
 /* ── Banner Transition ── */
@@ -502,14 +548,15 @@ function fillSuggestion(text) {
 .history-loading__ring {
   width: 36px;
   height: 36px;
-  border: 3px solid #EDE9FE;
-  border-top-color: #7C3AED;
+  border: 3px solid rgba(99, 102, 241, 0.1);
+  border-top-color: var(--color-primary);
   border-radius: 50%;
   animation: history-spin 0.8s linear infinite;
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.1);
 }
 .history-loading__text {
   font-size: 14px;
-  color: #8E8E8E;
+  color: var(--color-text-secondary);
   animation: history-fade 1.5s ease-in-out infinite;
 }
 @keyframes history-spin {
@@ -532,7 +579,7 @@ function fillSuggestion(text) {
 .empty-greeting {
   font-size: 22px;
   font-weight: 600;
-  color: #1F1F1F;
+  color: var(--color-text);
   text-align: center;
   margin-bottom: 24px;
 }
@@ -548,19 +595,29 @@ function fillSuggestion(text) {
   align-items: center;
   gap: 10px;
   padding: 12px 16px;
-  background: #FFFFFF;
-  border: 1px solid #E5E5E5;
+  background: var(--color-bg-glass);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--color-border);
   border-radius: 24px;
   cursor: pointer;
   text-align: left;
   font-size: 14px;
-  color: #1F1F1F;
-  transition: background 0.2s ease;
+  color: var(--color-text);
+  transition: all var(--transition-normal);
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
 .empty-card:active {
-  background: #F4F5F7;
+  background: var(--color-bg-glass-hover);
+  border-color: var(--color-border-glow);
+  box-shadow: var(--shadow-glow);
+}
+@media (hover: hover) {
+  .empty-card:hover {
+    background: var(--color-bg-glass-hover);
+    border-color: var(--color-border-glow);
+    box-shadow: var(--shadow-glow);
+  }
 }
 .empty-card-icon {
   font-size: 18px;
@@ -575,40 +632,55 @@ function fillSuggestion(text) {
   margin-left: 2px;
 }
 .nav-monitor-btn:active svg {
-  color: var(--primary);
+  color: var(--color-primary);
   transform: scale(0.9);
 }
 .nav-title--monitor {
-  color: #F59E0B;
+  color: var(--color-warning);
   letter-spacing: 1px;
 }
 
-/* ── Monitor Read-only Banner ── */
+/* ── Monitor Interactive Banner ── */
 .monitor-banner {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.08), rgba(245, 158, 11, 0.15));
-  border-top: 1px solid rgba(245, 158, 11, 0.2);
+  justify-content: center;
+  padding: 8px 12px;
+  border-top: 1px solid rgba(99, 102, 241, 0.15);
   gap: 10px;
+}
+.monitor-banner--interactive {
+  background: rgba(99, 102, 241, 0.06);
 }
 .monitor-banner__info {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
-  color: #92400E;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
+  min-width: 0;
 }
-.monitor-exit-btn.van-button {
+.monitor-exit-btn {
   flex-shrink: 0;
-  border-radius: 8px;
-  height: 28px;
-  font-size: 12px;
-  font-weight: 600;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: none;
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.monitor-exit-btn:active {
+  background: rgba(99, 102, 241, 0.2);
+  transform: scale(0.9);
 }
 </style>

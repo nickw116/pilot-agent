@@ -1,0 +1,6 @@
+{
+  "name": "个人助手",
+  "model": "minimax/m3",
+  "tools": ["read", "bash", "skill"],
+  "hidden": false
+}

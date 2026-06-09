@@ -4,11 +4,12 @@ import DOMPurify from 'dompurify'
 import { showImagePreview } from 'vant'
 
 /**
- * 检测文本中的媒体 URL（图片和 PDF）
- * 支持 markdown 图片语法 ![alt](url) 和裸 URL
- * 返回 { text: 清理后的文本, images: [{url}], pdfs: [{url}] }
+ * 检测文本中的媒体 URL（图片、PDF 和可下载文件）
+ * 支持 markdown 图片语法 ![alt](url) 和裸 URL / 本地路径
+ * 返回 { text: 清理后的文本, images: [url], pdfs: [url], files: [{url, name}] }
  */
 const LOCAL_PATH_PREFIXES = ['/tmp/', '/root/', '/home/', '/var/']
+const IMAGE_EXTS = /\.(jpe?g|png|gif|webp|svg|bmp|ico)(\?.*)?$/i
 
 function isLocalPath(url) {
   return LOCAL_PATH_PREFIXES.some(p => url.startsWith(p))
@@ -19,11 +20,20 @@ function toProxyUrl(path, token) {
   return `/api/local-file?path=${encodeURIComponent(path)}${qs}`
 }
 
+function toDownloadUrl(path, token) {
+  return toProxyUrl(path, token) + '&download=true'
+}
+
+function pathBasename(p) {
+  try { return decodeURIComponent(p.split('/').pop()) || 'file' } catch { return 'file' }
+}
+
 export function detectMediaUrls(text, token = '') {
-  if (!text) return { text, images: [], pdfs: [] }
+  if (!text) return { text, images: [], pdfs: [], files: [] }
 
   const images = []
   const pdfs = []
+  const files = []
 
   // 1. 处理 markdown 图片 ![alt](url)：保留语法在文本中，仅把本地路径替换为 proxy URL
   const mdImgRegex = /!\[([^\]]*)\]\(([^)\s]+)\)/g
@@ -49,15 +59,15 @@ export function detectMediaUrls(text, token = '') {
     return ''
   })
 
-  // 2c. 裸本地文件路径
-  // 关键修复：lookahead 不再排除 .，解决路径后跟句号（如句尾）无法匹配的问题
-  const localPathRegex = /(?:^|(?<![\w/.\-]))((?:\/tmp\/|\/root\/|\/home\/|\/var\/)[\w/.\-]+\.(jpe?g|png|gif|webp|svg|bmp|ico|pdf|txt|csv))(?=$|(?![\w/\-]))/gi
+  // 2c. 裸本地文件路径（扩展为匹配任意扩展名）
+  const localPathRegex = /(?:^|(?<![\w/.\-]))((?:\/tmp\/|\/root\/|\/home\/|\/var\/)[\w/.\-]+\.[a-zA-Z0-9]+)(?=$|(?![\w/\-]))/gi
   cleaned = cleaned.replace(localPathRegex, (_match, path) => {
-    const proxyUrl = toProxyUrl(path, token)
-    if (/\.(pdf|txt|csv)$/i.test(path)) {
-      pdfs.push(proxyUrl)
+    if (/\.(jpe?g|png|gif|webp|svg|bmp|ico)$/i.test(path)) {
+      images.push(toProxyUrl(path, token))
+    } else if (/\.pdf$/i.test(path)) {
+      pdfs.push(toProxyUrl(path, token))
     } else {
-      images.push(proxyUrl)
+      files.push({ url: toDownloadUrl(path, token), name: pathBasename(path) })
     }
     return ''
   })
@@ -83,7 +93,7 @@ export function detectMediaUrls(text, token = '') {
     return ''
   })
 
-  return { text: cleaned.trim(), images, pdfs }
+  return { text: cleaned.trim(), images, pdfs, files }
 }
 
 /**
@@ -116,6 +126,9 @@ const marked = new Marked({
   breaks: true,
   gfm: true,
   renderer: {
+    link({ href, title, text }) {
+      return `<a href="${href}" target="_blank" rel="noopener noreferrer"${title ? ` title="${title}"` : ""}>${text}</a>`
+    },
     image({ href, title, text }) {
       return `<img src="${href}" alt="${text || ''}" style="max-width:100%;height:auto;border-radius:8px;cursor:pointer">`
     },
@@ -163,7 +176,7 @@ export function renderMarkdown(text) {
   const rawHtml = marked.parse(safeText)
   const purified = DOMPurify.sanitize(rawHtml, {
     ADD_TAGS: ['img'],
-    ADD_ATTR: ['src', 'alt', 'style'],
+    ADD_ATTR: ['src', 'alt', 'style', 'target', 'rel'],
   })
   return purified
 }

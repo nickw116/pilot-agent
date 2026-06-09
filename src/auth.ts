@@ -25,13 +25,11 @@ function ensureUserColumns(d: Database.Database) {
   }
 }
 
-const AGENT_HIERARCHY = ["main", "dev", "user"];
-
-export function getAllowedAgents(allowedAgent: string | null): string[] {
-  const top = allowedAgent || "user";
-  const idx = AGENT_HIERARCHY.indexOf(top);
-  if (idx < 0) return ["user"];
-  return AGENT_HIERARCHY.slice(idx);
+// 新架构：admin 角色可见 main（智能助手）+ user（个人助手），普通用户只可见 user
+// 子 agent（dev）由 main agent 在后台通过 delegate 工具调用，用户不可见
+export function getAllowedAgents(_allowedAgent: string | null, role?: string): string[] {
+  if (role === "admin") return ["main", "user"];
+  return ["user"];
 }
 
 export interface User {

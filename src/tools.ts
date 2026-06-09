@@ -17,6 +17,8 @@ import {
   findChangedFiles,
   callMimoReview,
 } from "./review.js";
+import { ensureBootstrapFiles } from "./bootstrap.js";
+import { startAgentWork, logAgentWork, endAgentWork } from "./agent-tracker.js";
 
 let currentSseSessionKey: string | null = null;
 let currentSseRunId: string | null = null;
@@ -51,6 +53,16 @@ function publishAcpLog(event: AcpLogEvent): void {
       durationMs: event.durationMs || null,
     },
   });
+  // Forward delegate:* tool logs to agent tracker
+  if (event.tool?.startsWith("delegate:")) {
+    const agentId = event.tool.replace("delegate:", "");
+    logAgentWork(currentSseSessionKey, agentId, {
+      type: event.type,
+      tool: event.tool,
+      text: event.text,
+      durationMs: event.durationMs,
+    });
+  }
   if (SKIP_PERSIST_TYPES.has(event.type)) return;
   try {
     appendAcpLog(currentSseSessionKey, currentSseRunId, event, seq);
@@ -91,33 +103,32 @@ function checkBashSafety(command: string): string | null {
   return null;
 }
 
-const AGENTS_MD_CONTENT = `# AGENTS.md
-
-## 项目说明
-这是你的工作目录。你可以在这里读写文件、运行命令。
-
-## Pilot Agent 项目路径
-Pilot Agent 项目代码在 /home/ubuntu/pilot-agent/ 目录下：
-- 后端入口：/home/ubuntu/pilot-agent/src/index.ts
-- Agent 逻辑：/home/ubuntu/pilot-agent/src/agent.ts
-- SSE 事件桥接：/home/ubuntu/pilot-agent/src/event-bridge.ts
-- 前端代码：/home/ubuntu/pilot-agent/frontend/src/
-- Agent 配置：/home/ubuntu/pilot-agent/agents.json
-- 环境配置：/home/ubuntu/pilot-agent/.env
-
-## 注意事项
-- 修改 Pilot Agent 代码时，在 /home/ubuntu/pilot-agent/ 目录下操作
-- 不要去 /home/ubuntu/.openclaw/ 目录，那是另一个项目
-- 修改文件前先读取
-- 用 edit 而非 write 做局部修改
-`;
-
 function ensureWorkspace(workspaceRoot: string): void {
-  fs.mkdirSync(workspaceRoot, { recursive: true });
-  const agentsMd = path.join(workspaceRoot, "AGENTS.md");
-  if (!fs.existsSync(agentsMd)) {
-    fs.writeFileSync(agentsMd, AGENTS_MD_CONTENT, "utf-8");
-  }
+  ensureBootstrapFiles(workspaceRoot);
+  ensureClaudeSettings(workspaceRoot);
+}
+
+function ensureClaudeSettings(workspaceRoot: string): void {
+  const claudeDir = path.join(workspaceRoot, ".claude");
+  const settingsFile = path.join(claudeDir, "settings.json");
+  if (fs.existsSync(settingsFile)) return;
+  fs.mkdirSync(claudeDir, { recursive: true });
+  const settings = {
+    hooks: {
+      PreToolUse: [
+        {
+          matcher: "Bash",
+          hooks: [
+            {
+              type: "command",
+              command: "bash /home/ubuntu/pilot-agent/tools/check-self-restart.sh",
+            },
+          ],
+        },
+      ],
+    },
+  };
+  fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2), "utf-8");
 }
 
 function makeResolve(workspaceRoot: string) {
@@ -128,7 +139,7 @@ function makeResolve(workspaceRoot: string) {
   };
 }
 
-export function createUserTools(workspaceRoot: string, allowedTools?: string[], getImages?: () => { data: string; mimeType: string }[] | undefined): { tools: AgentTool<TSchema, string | Record<string, unknown>>[]; dispose: () => Promise<void> } {
+export function createUserTools(workspaceRoot: string, allowedTools?: string[], getImages?: () => { data: string; mimeType: string }[] | undefined, delegateFn?: (agentId: string, task: string, context?: string) => Promise<string>, subAgentIds?: string[], currentAgentId?: string): { tools: AgentTool<TSchema, string | Record<string, unknown>>[]; dispose: () => Promise<void> } {
   ensureWorkspace(workspaceRoot);
   const resolve = makeResolve(workspaceRoot);
 
@@ -174,7 +185,7 @@ export function createUserTools(workspaceRoot: string, allowedTools?: string[], 
     const p = resolve(params.path);
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.writeFileSync(p, params.content, "utf-8");
-    const msg = `Wrote ${Buffer.byteLength(params.content)} bytes to ${params.path}`;
+    const msg = `Wrote ${Buffer.byteLength(params.content)} bytes to ${p}`;
     return { content: [{ type: "text", text: msg }], details: msg };
   }
 
@@ -520,7 +531,7 @@ ${review.review}
   });
 
   function doSkill(params: Static<typeof SkillParams>): AgentToolResult<string> {
-    const content = loadSkillContent(params.id);
+    const content = loadSkillContent(params.id, currentAgentId);
     return { content: [{ type: "text", text: content }], details: content };
   }
 
@@ -531,6 +542,96 @@ ${review.review}
     label: "Skill",
     execute: (_id, params) => Promise.resolve(doSkill(params as Static<typeof SkillParams>)),
   });
+
+  // --- Delegate tool (for orchestrator agent) ---
+
+  if (delegateFn) {
+    const agentIdLiterals = (subAgentIds || []).map(id => Type.Literal(id));
+    const DelegateAgentId = agentIdLiterals.length === 1
+      ? agentIdLiterals[0]
+      : Type.Union(agentIdLiterals, { description: `Sub-agent to delegate to: ${(subAgentIds || []).join(", ") || "none"}` });
+
+    const DelegateParams = Type.Object({
+      agent_id: DelegateAgentId,
+      task: Type.String({ description: "Clear description of the task to delegate" }),
+      context: Type.Optional(Type.String({ description: "Additional context for the sub-agent" })),
+    });
+
+    tools.push({
+      name: "delegate",
+      description: "Delegate a task to a specialized sub-agent. Use 'dev' for complex coding tasks (via Claude Code). Use 'user' for personal assistant tasks like data analysis, stock analysis, content creation.",
+      parameters: DelegateParams,
+      label: "Delegate",
+      execute: async (_id, params, signal) => {
+        const p = params as Static<typeof DelegateParams>;
+        publishAcpLog({
+          type: "tool_start",
+          tool: `delegate:${p.agent_id}`,
+          text: `委派任务给 ${p.agent_id} agent: ${p.task.slice(0, 100)}...`,
+        });
+        // Start tracking for dev agent (user is tracked in runSubAgent)
+        if (p.agent_id === "dev" && currentSseSessionKey) {
+          startAgentWork(currentSseSessionKey, "dev", p.task);
+        }
+        try {
+          let result = "";
+          if (p.agent_id === "dev") {
+            // dev agent: use claude_code ACP directly, with retry
+            const devPrompt = p.context ? `${p.task}\n\n## 附加上下文\n${p.context}` : p.task;
+            for (let attempt = 0; attempt < 2; attempt++) {
+              try {
+                const client = await ensureClaudeAcp();
+                const devResult = await client.prompt(devPrompt);
+                result = devResult.content || "(Claude Code completed with no text output)";
+                break;
+              } catch (retryErr: any) {
+                const retryMsg = retryErr?.message || String(retryErr);
+                if (retryMsg.includes("ENOENT") || retryMsg.includes("spawn")) {
+                  throw retryErr;
+                }
+                if ((retryMsg.includes("timeout") || retryMsg.includes("ACP process exited")) && attempt === 0) {
+                  console.warn("[claude-acp] delegate→dev failure, restarting client and retrying...");
+                  claudeAcpReady = false;
+                  if (claudeAcpClient) await claudeAcpClient.stop().catch(() => {});
+                  continue;
+                }
+                throw retryErr;
+              }
+            }
+          } else {
+            // user: use sub-agent via delegateFn
+            result = await delegateFn(p.agent_id, p.task, p.context);
+          }
+          publishAcpLog({
+            type: "tool_end",
+            tool: `delegate:${p.agent_id}`,
+            text: `子 agent 完成 (${result.length} 字)`,
+          });
+          if (p.agent_id === "dev" && currentSseSessionKey) {
+            endAgentWork(currentSseSessionKey, "dev", "completed");
+          }
+          return {
+            content: [{ type: "text", text: result }],
+            details: result,
+          };
+        } catch (err: any) {
+          const msg = err?.message || String(err);
+          publishAcpLog({
+            type: "tool_end",
+            tool: `delegate:${p.agent_id}`,
+            text: `子 agent 错误: ${msg}`,
+          });
+          if (p.agent_id === "dev" && currentSseSessionKey) {
+            endAgentWork(currentSseSessionKey, "dev", "error", msg);
+          }
+          return {
+            content: [{ type: "text", text: `子 agent 错误: ${msg}` }],
+            details: `error: ${msg}`,
+          };
+        }
+      },
+    });
+  }
 
   // --- Memory tools (always available, not filtered) ---
 
@@ -607,8 +708,50 @@ ${review.review}
 
 export const tools = createUserTools(DEFAULT_WORKSPACE).tools;
 
+export function getAgentDir(agentId?: string): string {
+  const resolvedAgent = agentId || "main";
+  return path.join(DEFAULT_WORKSPACE, resolvedAgent);
+}
+
+// Migrate old flat structure (user-<id>/[agentId]/) to new agent-first structure (<agentId>/user-<id>/)
+const migratedKeys = new Set<string>();
+function migrateOldWorkspace(userId: number, agentId: string): void {
+  const key = `${agentId}:${userId}`;
+  if (migratedKeys.has(key)) return;
+  migratedKeys.add(key);
+
+  const newDir = path.join(DEFAULT_WORKSPACE, agentId, `user-${userId}`);
+  if (fs.existsSync(newDir)) return; // already migrated
+
+  // Old paths
+  const oldDirs = agentId === "main"
+    ? [path.join(DEFAULT_WORKSPACE, `user-${userId}`)]
+    : [path.join(DEFAULT_WORKSPACE, `user-${userId}`, agentId)];
+
+  const SKIP_ENTRIES = new Set(["AGENTS.md", "SOUL.md", "IDENTITY.md", "TOOLS.md", "USER.md", "dev", "user"]);
+
+  for (const oldDir of oldDirs) {
+    if (!fs.existsSync(oldDir)) continue;
+    const hasContent = fs.readdirSync(oldDir).some(f => !SKIP_ENTRIES.has(f));
+    if (!hasContent) continue;
+
+    fs.mkdirSync(path.dirname(newDir), { recursive: true });
+    try {
+      fs.cpSync(oldDir, newDir, { recursive: true, filter: (src) => {
+        const base = path.basename(src);
+        if (src === oldDir) return true;
+        return !SKIP_ENTRIES.has(base);
+      }});
+      console.log(`[workspace] migrated ${oldDir} → ${newDir}`);
+    } catch (err) {
+      console.error(`[workspace] migration failed for ${oldDir}:`, err);
+    }
+    return;
+  }
+}
+
 export function getUserWorkspaceDir(userId: number, agentId?: string): string {
-  const base = path.join(DEFAULT_WORKSPACE, `user-${userId}`);
-  if (!agentId || agentId === "main") return base;
-  return path.join(base, agentId);
+  const resolvedAgent = agentId || "main";
+  migrateOldWorkspace(userId, resolvedAgent);
+  return path.join(DEFAULT_WORKSPACE, resolvedAgent, `user-${userId}`);
 }

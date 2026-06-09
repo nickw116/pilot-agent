@@ -68,21 +68,11 @@
           class="send-btn"
           @click="onSend"
           :disabled="(!modelValue.trim() && !attachments.length) || uploading"
-          v-if="!loading"
+          title="发送"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <line x1="22" y1="2" x2="11" y2="13"></line>
             <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-          </svg>
-        </van-button>
-        <van-button
-          size="small"
-          class="stop-btn"
-          @click="$emit('abort')"
-          v-else
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-            <rect x="6" y="6" width="12" height="12" rx="2"/>
           </svg>
         </van-button>
       </div>
@@ -247,7 +237,7 @@ function renameFile(file) {
 }
 
 function onSend(e) {
-  if (props.loading || props.uploading) {
+  if (props.uploading) {
     e?.preventDefault?.()
     return
   }
@@ -296,7 +286,8 @@ function handleDrop(e) {
 .input-area {
   position: relative;
   flex-shrink: 0;
-  background: #FFFFFF;
+  background: var(--color-bg-secondary);
+  border-top: 1px solid var(--color-border);
   padding-top: 8px;
 }
 
@@ -311,14 +302,14 @@ function handleDrop(e) {
   flex-shrink: 0;
 }
 .attach-btn.van-button {
-  background: #E8E8E8;
-  border: none;
-  color: #8E8E8E;
+  background: var(--color-bg-glass);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
 }
 .attach-btn:active { transform: scale(0.92); }
 .attach-btn.van-button--disabled {
   opacity: 0.5;
-  color: #aaa;
+  color: var(--color-text-muted);
 }
 
 /* ── Voice Button ── */
@@ -333,18 +324,19 @@ function handleDrop(e) {
   position: relative;
 }
 .voice-btn.van-button {
-  background: #E8E8E8;
-  border: none;
-  color: #8E8E8E;
+  background: var(--color-bg-glass);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
 }
 .voice-btn:active { transform: scale(0.92); }
 .voice-btn.van-button--disabled {
   opacity: 0.5;
-  color: #aaa;
+  color: var(--color-text-muted);
 }
 .voice-btn--active.van-button {
-  background: #EF4444;
+  background: var(--color-danger);
   color: #FFFFFF;
+  border-color: var(--color-danger);
   animation: voice-pulse 1.2s ease-in-out infinite;
 }
 .voice-dot {
@@ -354,20 +346,21 @@ function handleDrop(e) {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #EF4444;
+  background: var(--color-danger);
   animation: dot-blink 0.8s ease-in-out infinite;
 }
 @keyframes voice-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
-  50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(255, 71, 87, 0); }
 }
 @keyframes dot-blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
 }
 .voice-btn--processing.van-button {
-  background: #007AFF;
+  background: var(--color-primary);
   color: #FFFFFF;
+  border-color: var(--color-primary);
 }
 .voice-spin {
   animation: voice-spin-anim 1s linear infinite;
@@ -394,8 +387,8 @@ function handleDrop(e) {
   height: 64px;
   border-radius: 10px;
   overflow: hidden;
-  border: 2px solid var(--border);
-  background: var(--white);
+  border: 2px solid var(--color-border);
+  background: var(--color-bg-glass);
   cursor: pointer;
 }
 .attachment-thumb img {
@@ -407,7 +400,7 @@ function handleDrop(e) {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--secondary);
+  color: var(--color-text-secondary);
 }
 .attachment-remove {
   position: absolute;
@@ -416,9 +409,9 @@ function handleDrop(e) {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: #EF4444;
+  background: var(--color-danger);
   color: white;
-  border: 2px solid white;
+  border: 2px solid var(--color-bg-secondary);
   font-size: 13px;
   line-height: 1;
   display: flex;
@@ -426,7 +419,7 @@ function handleDrop(e) {
   justify-content: center;
   cursor: pointer;
   padding: 0;
-  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.4);
+  box-shadow: 0 2px 6px rgba(255, 71, 87, 0.4);
 }
 .attachment-remove:active {
   transform: scale(0.85);
@@ -440,9 +433,10 @@ function handleDrop(e) {
   padding: 6px 12px;
   padding-bottom: max(6px, env(safe-area-inset-bottom));
   margin: 0 12px 8px;
-  background: #F0F2F5;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
   border-radius: 24px;
-  box-shadow: none;
+  box-shadow: var(--shadow-sm);
 }
 /* ── Input Wrapper (field + send/stop button) ── */
 .input-wrapper {
@@ -466,10 +460,10 @@ function handleDrop(e) {
   font-size: 15px;
 }
 .input-field .van-field__control {
-  color: var(--text);
+  color: var(--color-text);
 }
 .input-field .van-field__control::placeholder {
-  color: #8E8E8E;
+  color: var(--color-text-muted);
 }
 .send-btn {
   width: 32px;
@@ -481,35 +475,17 @@ function handleDrop(e) {
   flex-shrink: 0;
 }
 .send-btn.van-button {
-  background: #007AFF;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
   border: none;
   color: #FFFFFF;
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.2);
 }
 .send-btn:active { transform: scale(0.92); }
 .send-btn.van-button--disabled {
-  background: var(--border);
-  color: #aaa;
+  background: var(--color-bg-glass);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  box-shadow: none;
 }
 
-.stop-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  animation: pulse-stop 1.5s ease-in-out infinite;
-}
-.stop-btn.van-button {
-  background: #EF4444;
-  border: none;
-  color: white;
-}
-.stop-btn:active { transform: scale(0.92); }
-
-@keyframes pulse-stop {
-  0%, 100% { box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4); }
-  50% { box-shadow: 0 4px 20px rgba(239, 68, 68, 0.7); }
-}
 </style>

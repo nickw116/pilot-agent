@@ -31,21 +31,10 @@
           <div class="session-info">
             <div class="session-name">{{ getAgentName(s) }}</div>
             <div class="session-time">{{ formatTime(s) }}</div>
+            <div class="session-key" @click.stop="copyKey(s.sessionKey)" :title="s.sessionKey">{{ s.sessionKey }}</div>
           </div>
-          <button
-            v-if="!s.active"
-            class="session-delete"
-            @click.stop="handleDelete(s)"
-            title="删除"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-              <polyline points="3 6 5 6 21 6"/>
-              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-              <path d="M10 11v6"/>
-              <path d="M14 11v6"/>
-            </svg>
-          </button>
-          <div v-else class="session-active-badge">当前</div>
+          <div v-if="s.active" class="session-active-badge">当前</div>
+          <button v-if="!s.active" @click.stop="handleDelete(s)" class="session-delete-btn">删除</button>
         </div>
 
         <div v-if="sessions.length === 0 && !loading" class="session-empty">
@@ -128,13 +117,13 @@ async function handleDelete(s) {
       message: '确定要删除这个会话吗？',
       confirmButtonText: '删除',
       cancelButtonText: '取消',
-      confirmButtonColor: '#EF4444',
+      confirmButtonColor: '#FF4757',
     })
   } catch {
-    return // Cancelled
+    return
   }
   try {
-    const r = await fetch(`${API_BASE}${API_SESSIONS}?sessionKey=${encodeURIComponent(s.sessionKey)}`, {
+    const r = await fetch(`${API_BASE}/session/${encodeURIComponent(s.sessionKey)}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${props.token}` },
     })
@@ -152,6 +141,10 @@ function getAgentName(s) {
   return props.agents.find(a => a.id === agentId)?.name || agentId || '会话'
 }
 
+function copyKey(key) {
+  navigator.clipboard.writeText(key).catch(() => {})
+}
+
 function formatTime(s) {
   const ts = s.createdAt
   if (!ts) return ''
@@ -164,10 +157,9 @@ function formatTime(s) {
 }
 </script>
 
-<style>
-/* ── Session Drawer ── */
+<style scoped>
 .session-drawer.van-popup {
-  background: var(--bg);
+  background: var(--color-bg-secondary);
 }
 .session-panel {
   display: flex;
@@ -180,13 +172,13 @@ function formatTime(s) {
   align-items: center;
   justify-content: space-between;
   padding: 20px 18px 14px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-border);
 }
 .session-header h3 {
   font-family: 'Space Grotesk', sans-serif;
   font-size: 18px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--color-text);
   margin: 0;
 }
 .new-session-btn {
@@ -195,10 +187,10 @@ function formatTime(s) {
   font-weight: 600;
 }
 .new-session-btn.van-button {
-  background: var(--accent);
+  background: var(--color-accent);
   border: none;
   color: white;
-  box-shadow: 0 2px 8px rgba(6, 182, 212, 0.25);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.2);
   padding: 0 12px;
   height: 32px;
 }
@@ -216,51 +208,72 @@ function formatTime(s) {
 }
 .new-session-btn:active { transform: scale(0.95); }
 
-/* ── Session List ── */
 .session-list {
   flex: 1;
   overflow-y: auto;
   padding: 10px 12px;
   -webkit-overflow-scrolling: touch;
 }
+.session-list .van-swipe-cell {
+  margin-bottom: 6px;
+  border-radius: 14px;
+  overflow: hidden;
+}
+.session-delete-btn {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 71, 87, 0.1);
+  color: var(--color-danger);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.session-delete-btn:active {
+  background: rgba(255, 71, 87, 0.2);
+  transform: scale(0.92);
+}
 .session-item {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 12px 14px;
-  border-radius: 14px;
-  margin-bottom: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--color-bg-glass);
   border: 1.5px solid transparent;
+  border-radius: 12px;
+  margin-bottom: 8px;
 }
 .session-item:hover {
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--color-bg-glass-hover);
 }
 .session-item:active {
   transform: scale(0.98);
 }
 .session-item.active {
-  background: rgba(124, 58, 237, 0.08);
-  border-color: var(--primary);
-  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.1);
+  background: rgba(99, 102, 241, 0.06);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.06);
 }
 
 .session-icon {
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: rgba(124, 58, 237, 0.1);
-  color: var(--primary);
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--color-primary);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
 .session-item.active .session-icon {
-  background: var(--primary);
-  color: white;
+  background: var(--color-primary);
+  color: var(--color-bg);
+  box-shadow: 0 0 8px rgba(99, 102, 241, 0.15);
 }
 
 .session-info {
@@ -270,7 +283,7 @@ function formatTime(s) {
 .session-name {
   font-size: 14px;
   font-weight: 500;
-  color: var(--text);
+  color: var(--color-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -278,50 +291,50 @@ function formatTime(s) {
 }
 .session-time {
   font-size: 12px;
-  color: #999;
+  color: var(--color-text-muted);
   line-height: 1.3;
   margin-top: 2px;
 }
+.session-key {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  opacity: 0.6;
+  font-family: 'SF Mono', 'Menlo', monospace;
+  word-break: break-all;
+  line-height: 1.4;
+  margin-top: 2px;
+  cursor: pointer;
+}
+.session-key:hover {
+  opacity: 1;
+  color: var(--color-primary);
+}
 .session-item.active .session-name {
-  color: var(--primary);
+  color: var(--color-primary);
   font-weight: 600;
 }
 
-.session-delete {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  border: none;
-  background: rgba(239, 68, 68, 0.08);
-  color: #EF4444;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all 0.2s ease;
-  padding: 0;
-}
-.session-delete:hover {
-  background: rgba(239, 68, 68, 0.15);
-}
-.session-delete:active {
-  transform: scale(0.85);
+.delete-btn {
+  height: 100% !important;
+  border: none !important;
+  border-radius: 0 !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
 }
 
 .session-active-badge {
   font-size: 11px;
-  color: var(--primary);
+  color: var(--color-primary);
   font-weight: 600;
   flex-shrink: 0;
   padding: 2px 8px;
-  background: rgba(124, 58, 237, 0.1);
+  background: rgba(99, 102, 241, 0.08);
   border-radius: 6px;
 }
 
 .session-empty {
   text-align: center;
-  color: #aaa;
+  color: var(--color-text-muted);
   font-size: 14px;
   padding: 40px 0;
 }

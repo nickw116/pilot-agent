@@ -27,7 +27,7 @@ export function appendAssistantTextSafely(currentText = '', incomingText = '') {
 }
 
 export function createEmptyMedia() {
-  return { text: '', images: [], pdfs: [] }
+  return { text: '', images: [], pdfs: [], files: [] }
 }
 
 export function ensureMessageMedia(msg) {
@@ -36,6 +36,7 @@ export function ensureMessageMedia(msg) {
   } else {
     if (!Array.isArray(msg.media.images)) msg.media.images = []
     if (!Array.isArray(msg.media.pdfs)) msg.media.pdfs = []
+    if (!Array.isArray(msg.media.files)) msg.media.files = []
     if (typeof msg.media.text !== 'string') msg.media.text = ''
   }
   return msg.media
@@ -48,6 +49,13 @@ export function syncMessageMediaFromContent(msg, token = '', contentField = 'con
   media.text = parsed.text || ''
   media.images = Array.from(new Set([...(media.images || []), ...(parsed.images || [])]))
   media.pdfs = Array.from(new Set([...(media.pdfs || []), ...(parsed.pdfs || [])]))
+  const existingUrls = new Set((media.files || []).map(f => f.url))
+  for (const f of (parsed.files || [])) {
+    if (!existingUrls.has(f.url)) {
+      media.files.push(f)
+      existingUrls.add(f.url)
+    }
+  }
 }
 
 export function scanAndMergeMedia(msg, text, token = '') {

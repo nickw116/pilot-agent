@@ -90,6 +90,11 @@ export function createSession(userId: number, username: string, agentId = "main"
   };
 }
 
+export function getSession(sessionKey: string): Session | undefined {
+  const d = getDb();
+  return d.prepare("SELECT * FROM sessions WHERE session_key = ?").get(sessionKey) as Session | undefined;
+}
+
 export function getOrCreateActiveSession(userId: number, username: string, agentId = "main"): Session {
   const d = getDb();
   const row = d

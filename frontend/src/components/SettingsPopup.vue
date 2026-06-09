@@ -3,7 +3,6 @@
     <div class="settings-panel">
       <h3>{{ showChangePassword ? '修改密码' : '设置' }}</h3>
 
-      <!-- 正常设置页 -->
       <template v-if="!showChangePassword">
         <van-cell-group inset class="settings-fields">
           <van-cell title="用户" :value="userDisplay" />
@@ -13,23 +12,6 @@
             </template>
           </van-cell>
         </van-cell-group>
-
-        <!-- Agent 切换 -->
-        <div v-if="agents.length > 1" class="agent-section">
-          <div class="agent-label">助手类型</div>
-          <div class="agent-grid">
-            <div
-              v-for="agent in agents"
-              :key="agent.id"
-              class="agent-card"
-              :class="{ active: currentAgentId === agent.id }"
-              @click="handleSelectAgent(agent.id)"
-            >
-              <div class="agent-name">{{ agent.name }}</div>
-              <div class="agent-id">{{ agent.id }}</div>
-            </div>
-          </div>
-        </div>
 
         <van-button block class="settings-btn settings-btn-outline" @click="showChangePassword = true">
           修改密码
@@ -42,7 +24,6 @@
         </van-button>
       </template>
 
-      <!-- 修改密码表单 -->
       <template v-else>
         <div class="change-password-form">
           <van-field
@@ -95,11 +76,9 @@ const props = defineProps({
   show: { type: Boolean, default: false },
   currentUser: { type: Object, default: null },
   sessionKey: { type: String, default: '' },
-  agents: { type: Array, default: () => [] },
-  currentAgentId: { type: String, default: 'main' },
 })
 
-const emit = defineEmits(['update:show', 'clear-chat', 'logout', 'change-password', 'switch-agent'])
+const emit = defineEmits(['update:show', 'clear-chat', 'logout', 'change-password'])
 
 const visible = computed({
   get: () => props.show,
@@ -108,23 +87,9 @@ const visible = computed({
 
 const userDisplay = computed(() => {
   if (!props.currentUser) return ''
-  return `${props.currentUser.username} (${props.currentUser.role})`
+  return props.currentUser.displayName || props.currentUser.username || ''
 })
 
-function handleClearChat() {
-  emit('clear-chat')
-}
-
-function handleLogout() {
-  emit('logout')
-}
-
-function handleSelectAgent(agentId) {
-  if (agentId === props.currentAgentId) return
-  emit('switch-agent', agentId)
-}
-
-// ── 修改密码 ──
 const showChangePassword = ref(false)
 const oldPassword = ref('')
 const newPassword = ref('')
@@ -159,12 +124,19 @@ async function handleChangePassword() {
     }
   })
 }
+
+function handleClearChat() {
+  emit('clear-chat')
+}
+
+function handleLogout() {
+  emit('logout')
+}
 </script>
 
 <style>
-/* ── Settings Popup ── */
 .settings-popup.van-popup {
-  background: var(--bg);
+  background: var(--color-bg-secondary);
 }
 .settings-panel {
   padding: 24px 16px 36px;
@@ -175,7 +147,7 @@ async function handleChangePassword() {
   margin-bottom: 20px;
   font-size: 20px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--color-text);
 }
 .session-code {
   font-size: 12px;
@@ -191,71 +163,24 @@ async function handleChangePassword() {
 }
 .settings-btn-primary.van-button {
   margin-top: 20px;
-  background: var(--accent);
+  background: var(--color-accent);
   border: none;
   color: white;
-  box-shadow: 0 4px 14px rgba(6, 182, 212, 0.3);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
 }
 .settings-btn-default.van-button {
   margin-top: 16px;
-  background: rgba(124, 58, 237, 0.08);
-  border: 1.5px solid var(--border);
-  color: var(--primary);
+  background: rgba(99, 102, 241, 0.06);
+  border: 1.5px solid var(--color-border);
+  color: var(--color-primary);
 }
 .settings-btn-outline.van-button {
   margin-top: 16px;
-  background: var(--white);
-  border: 1.5px solid var(--primary);
-  color: var(--primary);
+  background: var(--color-bg-glass);
+  border: 1.5px solid var(--color-primary);
+  color: var(--color-primary);
 }
 .settings-btn:active { transform: scale(0.98); }
-
-/* ── Agent Section ── */
-.agent-section {
-  margin-top: 16px;
-  padding: 0 4px;
-}
-.agent-label {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-  margin-bottom: 10px;
-}
-.agent-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-}
-.agent-card {
-  background: var(--white);
-  border: 1.5px solid var(--border);
-  border-radius: 12px;
-  padding: 12px 8px;
-  text-align: center;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.agent-card:active { transform: scale(0.96); }
-.agent-card.active {
-  border-color: var(--accent);
-  background: rgba(0, 122, 255, 0.06);
-  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.15);
-}
-.agent-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-}
-.agent-card.active .agent-name {
-  color: var(--accent);
-}
-.agent-id {
-  font-size: 11px;
-  color: var(--secondary);
-  margin-top: 4px;
-}
-
-/* ── Change Password Form ── */
 .change-password-form {
   display: flex;
   flex-direction: column;
@@ -263,14 +188,14 @@ async function handleChangePassword() {
 .pw-field.van-cell {
   border-radius: 12px;
   margin-bottom: 12px;
-  background: rgba(255,255,255,0.9);
-  border: 1.5px solid var(--border);
+  background: var(--color-bg-glass);
+  border: 1.5px solid var(--color-border);
 }
 .pw-field:focus-within {
-  border-color: var(--primary);
+  border-color: var(--color-primary);
 }
 .pw-error {
-  color: #EF4444;
+  color: var(--color-danger);
   font-size: 13px;
   text-align: center;
   margin-bottom: 12px;

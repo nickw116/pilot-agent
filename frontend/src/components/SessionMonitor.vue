@@ -38,7 +38,7 @@
         <div
           v-for="s in sessions"
           :key="s.sessionKey"
-          :class="['session-item', { active: s.sessionKey === props.currentSessionKey }]"
+          :class="['session-item', { active: s.sessionKey === activeKey }]"
           @click="handleView(s)"
         >
           <div :class="['session-icon', `agent-${s.agentId}`]">
@@ -56,9 +56,14 @@
               <span class="session-time">{{ formatTime(s) }}</span>
               <span v-if="s.status === 'generating'" class="status-generating">生成中</span>
             </div>
+            <div class="session-key-row">
+              <span class="session-key" @click.stop="copyKey(s.sessionKey)" :title="s.sessionKey">{{ s.sessionKey }}</span>
+            </div>
           </div>
-          <div v-if="s.sessionKey === props.currentSessionKey" class="session-active-badge">当前</div>
-          <div v-else class="session-view-btn">查看</div>
+          <div class="session-actions">
+            <div v-if="s.sessionKey === activeKey" class="session-active-badge">当前</div>
+            <button v-if="s.username === props.currentUsername" @click.stop="handleDelete(s)" class="session-delete-btn">删除</button>
+          </div>
         </div>
 
         <div v-if="sessions.length === 0 && !loading" class="session-empty">
@@ -72,6 +77,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
+import { showConfirmDialog } from 'vant'
 import { API_BASE, API_ADMIN_SESSIONS } from '../constants/index.js'
 
 const props = defineProps({
@@ -79,9 +85,13 @@ const props = defineProps({
   token: { type: String, default: '' },
   agents: { type: Array, default: () => [] },
   currentSessionKey: { type: String, default: '' },
+  currentUsername: { type: String, default: '' },
+  monitorSessionKey: { type: String, default: '' },
 })
 
-const emit = defineEmits(['update:show', 'view-session', 'new'])
+const activeKey = computed(() => props.monitorSessionKey || props.currentSessionKey)
+
+const emit = defineEmits(['update:show', 'view-session', 'new', 'delete'])
 
 const visible = computed({
   get: () => props.show,
@@ -93,15 +103,15 @@ const loading = ref(false)
 const selectedAgentId = ref('')
 
 const agentOptions = computed(() => {
-  const opts = [{ id: '', name: '全部' }]
+  const list = [{ id: '', name: '全部' }]
   for (const a of props.agents) {
-    opts.push({ id: a.id, name: a.name })
+    list.push({ id: a.id, name: a.name || a.id })
   }
-  return opts
+  return list
 })
 
-watch([() => props.show, selectedAgentId], ([isOpen]) => {
-  if (isOpen) loadAllSessions()
+watch(() => props.show, (v) => {
+  if (v) loadAllSessions()
 })
 
 async function loadAllSessions() {
@@ -109,14 +119,13 @@ async function loadAllSessions() {
   try {
     const params = new URLSearchParams()
     if (selectedAgentId.value) params.set('agent_id', selectedAgentId.value)
+    params.set('all', '1')
     const r = await fetch(`${API_BASE}${API_ADMIN_SESSIONS}?${params}`, {
       headers: { Authorization: `Bearer ${props.token}` },
     })
     if (r.ok) {
       const data = await r.json()
       sessions.value = data.sessions || []
-    } else if (r.status === 403) {
-      sessions.value = []
     }
   } catch (err) {
     console.error('[SessionMonitor] load failed:', err)
@@ -130,18 +139,48 @@ function handleView(s) {
   visible.value = false
 }
 
-function handleNew() {
+async function handleNew() {
   emit('new')
   visible.value = false
 }
 
+async function handleDelete(s) {
+  try {
+    await showConfirmDialog({
+      title: '删除会话',
+      message: '确定要删除这个会话吗？此操作不可恢复。',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      confirmButtonColor: '#FF4757',
+    })
+  } catch {
+    return
+  }
+  try {
+    const r = await fetch(`${API_BASE}/session/${encodeURIComponent(s.sessionKey)}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${props.token}` },
+    })
+    if (r.ok) {
+      sessions.value = sessions.value.filter(x => x.sessionKey !== s.sessionKey)
+      emit('delete', s.sessionKey)
+    }
+  } catch (err) {
+    console.error('[SessionMonitor] delete failed:', err)
+  }
+}
+
+function copyKey(key) {
+  navigator.clipboard.writeText(key).catch(() => {})
+}
+
 function getAgentName(s) {
   const agentId = s.agentId || ''
-  return props.agents.find(a => a.id === agentId)?.name || agentId
+  return props.agents.find(a => a.id === agentId)?.name || agentId || '会话'
 }
 
 function formatTime(s) {
-  const ts = s.createdAt || s.updatedAt
+  const ts = s.createdAt
   if (!ts) return ''
   const d = new Date(typeof ts === 'number' && ts < 1e12 ? ts * 1000 : ts)
   const mm = String(d.getMonth() + 1).padStart(2, '0')
@@ -152,10 +191,9 @@ function formatTime(s) {
 }
 </script>
 
-<style>
-/* ── Drawer base ── */
+<style scoped>
 .session-drawer.van-popup {
-  background: var(--bg);
+  background: var(--color-bg-secondary);
 }
 .session-panel {
   display: flex;
@@ -168,32 +206,29 @@ function formatTime(s) {
   align-items: center;
   justify-content: space-between;
   padding: 20px 18px 14px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-border);
 }
 .session-header h3 {
   font-family: 'Space Grotesk', sans-serif;
   font-size: 18px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--color-text);
   margin: 0;
 }
 .session-header-actions {
   display: flex;
-  align-items: center;
   gap: 8px;
 }
-
-/* New session button */
 .new-session-btn {
   border-radius: 10px;
   font-size: 13px;
   font-weight: 600;
 }
 .new-session-btn.van-button {
-  background: var(--accent);
+  background: var(--color-accent);
   border: none;
   color: white;
-  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.25);
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.15);
   padding: 0 12px;
   height: 32px;
 }
@@ -210,33 +245,27 @@ function formatTime(s) {
   line-height: 1;
 }
 .new-session-btn:active { transform: scale(0.95); }
-
-/* Refresh button */
+.refresh-btn {
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
 .refresh-btn.van-button {
-  background: transparent;
-  border: 1.5px solid var(--border);
-  color: #666;
-  border-radius: 8px;
-  width: 32px;
+  background: var(--color-bg-glass);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  padding: 0 10px;
   height: 32px;
-  padding: 0;
 }
-.refresh-btn.van-button:active {
-  transform: scale(0.9);
-}
-.refresh-btn .van-button__content {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+.refresh-btn:active { transform: scale(0.95); }
 
-/* ── Agent filter bar ── */
+/* ── Agent Filter ── */
 .agent-filter {
   display: flex;
   gap: 6px;
   padding: 10px 14px;
   overflow-x: auto;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-border);
 }
 .agent-filter-item {
   flex-shrink: 0;
@@ -244,17 +273,17 @@ function formatTime(s) {
   border-radius: 14px;
   font-size: 12px;
   font-weight: 500;
-  color: #666;
-  background: rgba(255, 255, 255, 0.6);
-  border: 1.5px solid var(--border);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-glass);
+  border: 1.5px solid var(--color-border);
   cursor: pointer;
   transition: all 0.2s ease;
 }
 .agent-filter-item.active {
   color: white;
-  background: var(--accent);
-  border-color: var(--accent);
-  box-shadow: 0 2px 6px rgba(0, 122, 255, 0.2);
+  background: var(--color-accent);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.15);
 }
 
 /* ── Session list ── */
@@ -273,29 +302,30 @@ function formatTime(s) {
   margin-bottom: 8px;
   cursor: pointer;
   transition: all 0.2s ease;
-  background: rgba(255, 255, 255, 0.6);
+  background: var(--color-bg-glass);
   border: 1.5px solid transparent;
 }
 .session-item:hover {
-  background: rgba(255, 255, 255, 0.95);
-  border-color: rgba(0, 122, 255, 0.15);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  background: var(--color-bg-glass-hover);
+  border-color: var(--color-border-glow);
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.06);
 }
 .session-item:active {
   transform: scale(0.98);
-  background: rgba(0, 122, 255, 0.04);
+  background: rgba(99, 102, 241, 0.03);
 }
 .session-item.active {
-  background: rgba(0, 122, 255, 0.06);
-  border-color: var(--accent);
-  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.1);
+  background: rgba(99, 102, 241, 0.04);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.08);
 }
 .session-item.active .session-icon {
-  background: var(--accent);
+  background: var(--color-accent);
   color: white;
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.15);
 }
 .session-item.active .user-badge {
-  color: var(--accent);
+  color: var(--color-primary);
 }
 
 /* Session icon */
@@ -309,16 +339,16 @@ function formatTime(s) {
   flex-shrink: 0;
 }
 .session-icon.agent-main {
-  background: rgba(59, 130, 246, 0.1);
-  color: #3B82F6;
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--color-primary);
 }
 .session-icon.agent-dev {
-  background: rgba(16, 185, 129, 0.1);
-  color: #10B981;
+  background: rgba(0, 229, 160, 0.1);
+  color: var(--color-success);
 }
 .session-icon.agent-user {
-  background: rgba(156, 163, 175, 0.1);
-  color: #6B7280;
+  background: rgba(139, 139, 158, 0.1);
+  color: var(--color-text-secondary);
 }
 
 /* Session info */
@@ -335,7 +365,7 @@ function formatTime(s) {
 .user-badge {
   font-size: 14px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--color-text);
 }
 .agent-badge {
   font-size: 10px;
@@ -343,9 +373,9 @@ function formatTime(s) {
   border-radius: 4px;
   font-weight: 500;
 }
-.agent-badge.agent-main { background: rgba(59, 130, 246, 0.1); color: #3B82F6; }
-.agent-badge.agent-dev { background: rgba(16, 185, 129, 0.1); color: #10B981; }
-.agent-badge.agent-user { background: rgba(156, 163, 175, 0.1); color: #6B7280; }
+.agent-badge.agent-main { background: rgba(99, 102, 241, 0.08); color: var(--color-primary); }
+.agent-badge.agent-dev { background: rgba(0, 229, 160, 0.1); color: var(--color-success); }
+.agent-badge.agent-user { background: rgba(139, 139, 158, 0.1); color: var(--color-text-secondary); }
 
 .session-meta {
   display: flex;
@@ -355,7 +385,7 @@ function formatTime(s) {
 }
 .session-title {
   font-size: 12px;
-  color: #999;
+  color: var(--color-text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -363,13 +393,31 @@ function formatTime(s) {
 }
 .session-time {
   font-size: 12px;
-  color: #aaa;
+  color: var(--color-text-muted);
+}
+.session-key-row {
+  margin-top: 3px;
+}
+.session-key {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  opacity: 0.6;
+  font-family: 'SF Mono', 'Menlo', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  cursor: pointer;
+}
+.session-key:hover {
+  opacity: 1;
+  color: var(--color-primary);
 }
 
 /* Generating status */
 .status-generating {
   font-size: 10px;
-  color: #F59E0B;
+  color: var(--color-warning);
   font-weight: 600;
   animation: pulse-opacity 1.5s ease-in-out infinite;
 }
@@ -379,6 +427,13 @@ function formatTime(s) {
 }
 
 /* View button & Active badge — shared alignment */
+.session-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
 .session-view-btn,
 .session-active-badge {
   flex-shrink: 0;
@@ -391,36 +446,41 @@ function formatTime(s) {
   align-self: center;
 }
 .session-view-btn {
-  color: var(--accent);
-  background: rgba(0, 122, 255, 0.06);
-  border: 1px solid rgba(0, 122, 255, 0.15);
+  color: var(--color-primary);
+  background: rgba(99, 102, 241, 0.04);
+  border: 1px solid rgba(99, 102, 241, 0.1);
   transition: all 0.2s ease;
 }
 .session-item:hover .session-view-btn {
-  background: rgba(0, 122, 255, 0.1);
-  border-color: rgba(0, 122, 255, 0.3);
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.15);
 }
 .session-active-badge {
-  color: var(--accent);
-  background: rgba(0, 122, 255, 0.08);
+  color: var(--color-primary);
+  background: rgba(99, 102, 241, 0.06);
+}
+.session-delete-btn {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border: none;
+  border-radius: 5px;
+  background: rgba(255, 71, 87, 0.07);
+  color: var(--color-danger);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.session-delete-btn:active {
+  background: rgba(255, 71, 87, 0.2);
+  transform: scale(0.92);
 }
 
 /* Empty state */
 .session-empty {
   text-align: center;
-  color: #aaa;
+  color: var(--color-text-muted);
   font-size: 14px;
   padding: 40px 0;
-}
-
-/* Active badge */
-.session-active-badge {
-  flex-shrink: 0;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--accent);
-  padding: 3px 10px;
-  border-radius: 6px;
-  background: rgba(0, 122, 255, 0.08);
 }
 </style>

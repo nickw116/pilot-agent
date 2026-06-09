@@ -1,0 +1,101 @@
+{
+  "stock": {
+    "code": "002522.SZ",
+    "name": "浙江众成",
+    "description": null,
+    "pe_median": 58.611507,
+    "pe_percentile": 71.9,
+    "industry": {
+      "level1": "基础化工",
+      "level2": "塑料",
+      "level3": "膜材料"
+    },
+    "is_leader": "否",
+    "fund": {
+      "holding": null,
+      "change": null
+    },
+    "northbound": {
+      "holding": 0.01,
+      "change": 0.0
+    }
+  },
+  "peers": [
+    {
+      "code": "000920.SZ",
+      "name": "沃顿科技",
+      "pe_median": 38.15089,
+      "pe_percentile": 11.9,
+      "is_leader": "4"
+    },
+    {
+      "code": "688718.SH",
+      "name": "唯赛勃",
+      "pe_median": 68.67129,
+      "pe_percentile": 40.2,
+      "is_leader": "否"
+    },
+    {
+      "code": "002632.SZ",
+      "name": "道明光学",
+      "pe_median": 35.308193,
+      "pe_percentile": 45.9,
+      "is_leader": "3"
+    },
+    {
+      "code": "301687.SZ",
+      "name": "新广益",
+      "pe_median": 67.8652,
+      "pe_percentile": 52.6,
+      "is_leader": "否"
+    },
+    {
+      "code": "301565.SZ",
+      "name": "中仑新材",
+      "pe_median": 94.2669,
+      "pe_percentile": 62.7,
+      "is_leader": "否"
+    },
+    {
+      "code": "000973.SZ",
+      "name": "佛塑科技",
+      "pe_median": 39.323383,
+      "pe_percentile": 74.0,
+      "is_leader": "否"
+    },
+    {
+      "code": "002263.SZ",
+      "name": "大东南",
+      "pe_median": 56.480076,
+      "pe_percentile": 84.9,
+      "is_leader": "否"
+    },
+    {
+      "code": "001378.SZ",
+      "name": "德冠新材",
+      "pe_median": 33.594723,
+      "pe_percentile": 85.0,
+      "is_leader": "否"
+    },
+    {
+      "code": "688386.SH",
+      "name": "泛亚微透",
+      "pe_median": 57.602627,
+      "pe_percentile": 86.1,
+      "is_leader": "2"
+    },
+    {
+      "code": "601208.SH",
+      "name": "东材科技",
+      "pe_median": 43.81603,
+      "pe_percentile": 91.3,
+      "is_leader": "5"
+    }
+  ],
+  "jiuyan": {
+    "available": false,
+    "warning": "韭研公社数据未配置（需登录 Cookie），题材/异动数据不可用"
+  },
+  "_report": "## 浙江众成（002522.SZ）基本面分析\n\n### 一、核心结论\n浙江众成（002522.SZ）属于基础化工 → 塑料 → 膜材料行业，当前 PE 分位偏高。\n\n### 二、公司基本面\n- **主营业务**: 暂无描述\n- **行业分类**: 基础化工 → 塑料 → 膜材料\n\n### 三、估值水平\n- **PE 中值**: 58.61\n- **PE 历史分位**: 71.9%（偏高）\n\n### 四、资金动向\n- **公募持仓**: 无数据\n- **北向持仓**: 0.01 亿元（持平）\n\n### 五、行业地位\n在 膜材料 中的 PE 对比：\n\n| 股票 | PE 中值 | PE 分位 | 龙头 |\n|------|---------|---------|------|\n| **浙江众成** | **58.6** | **71.9%** |  |\n| 沃顿科技 | 38.2 | 11.9% |  |\n| 唯赛勃 | 68.7 | 40.2% |  |\n| 道明光学 | 35.3 | 45.9% |  |\n| 新广益 | 67.9 | 52.6% |  |\n| 中仑新材 | 94.3 | 62.7% |  |\n| 佛塑科技 | 39.3 | 74.0% |  |\n| 大东南 | 56.5 | 84.9% |  |\n| 德冠新材 | 33.6 | 85.0% |  |\n\n### 六、韭研公社题材参考\n*韭研公社数据未配置（需登录 Cookie），题材/异动数据不可用*\n\n### 七、投资亮点与风险\n- **亮点**:\n  1. 数据有限，暂无明显亮点\n- **风险**:\n  1. 估值偏高（PE 分位 71.9%）\n  1. 缺少主营业务描述，信息不完整\n",
+  "cached_at": 1780498705.825591
+}

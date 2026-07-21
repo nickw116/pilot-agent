@@ -1,6 +1,0 @@
-{
-  "name": "开发助手",
-  "model": "claude-code",
-  "tools": ["claude_code", "skill"],
-  "hidden": true
-}

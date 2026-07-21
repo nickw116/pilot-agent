@@ -1,0 +1,29 @@
+{
+  "id": "general",
+  "name": "通用助手",
+  "icon": "💬",
+  "description": "日常问答、写作翻译、编程辅助、文档处理、云服务管理",
+  "skills": [
+    "github",
+    "web-search",
+    "web-reader",
+    "tencent-docs",
+    "tencent-cos-skill",
+    "tencent-meeting-skill",
+    "tencentcloud-lighthouse-skill",
+    "ppt-maker",
+    "md-to-slides",
+    "beautiful-mermaid",
+    "finance-news-brief",
+    "gs-stock-market-query",
+    "gs-stock-financial-query",
+    "stock-fundamental-analysis"
+  ],
+  "promptSuffix": "",
+  "suggestions": [
+    { "icon": "💡", "text": "帮我写一段Python爬虫代码" },
+    { "icon": "📝", "text": "帮我写一封工作周报" },
+    { "icon": "🌐", "text": "把这段话翻译成英文" },
+    { "icon": "📊", "text": "帮我分析一组销售数据" }
+  ]
+}

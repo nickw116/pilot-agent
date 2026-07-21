@@ -1,0 +1,32 @@
+{
+  "id": "securities",
+  "name": "证券分析",
+  "icon": "📈",
+  "description": "A股技术面+基本面分析、行情查询、选股筛选、财经新闻",
+  "default": true,
+  "skills": [
+    "stock-fundamental-analysis",
+    "stock-chart-analysis",
+    "gs-stock-market-query",
+    "gs-stock-financial-query",
+    "gs-smart-stock-picking",
+    "gs-etf-filter",
+    "gs-fund-compare",
+    "gs-economy-query",
+    "finance-news-brief",
+    "five-elements-analysis",
+    "serenity-analysis",
+    "quadrant-analysis",
+    "westockdata",
+    "jiuyan-panqian",
+    "web-search",
+    "web-reader"
+  ],
+  "promptSuffix": "",
+  "suggestions": [
+    { "icon": "📈", "text": "分析宁德时代的基本面" },
+    { "icon": "📊", "text": "今日A股涨幅前10名" },
+    { "icon": "🔍", "text": "帮我筛选PE<20的白酒股" },
+    { "icon": "📰", "text": "今日财经新闻简报" }
+  ]
+}

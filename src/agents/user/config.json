@@ -1,6 +1,7 @@
 {
-  "name": "个人助手",
+  "name": "Pilot Agent",
   "model": "minimax/m3",
-  "tools": ["read", "bash", "skill"],
+  "tools": ["read", "write", "edit", "bash", "skill"],
+  "skills": [],
   "hidden": false
 }

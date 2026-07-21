@@ -1,7 +1,0 @@
-{
-  "name": "任务分配助手",
-  "model": "minimax/m3",
-  "tools": ["read", "bash", "skill", "delegate"],
-  "subAgents": ["dev", "user"],
-  "hidden": false
-}

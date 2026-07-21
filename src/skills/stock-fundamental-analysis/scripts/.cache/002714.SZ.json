@@ -1,0 +1,101 @@
+{
+  "stock": {
+    "code": "002714.SZ",
+    "name": "牧原股份",
+    "description": "养殖龙头",
+    "pe_median": 19.486954,
+    "pe_percentile": 57.4,
+    "industry": {
+      "level1": "农林牧渔",
+      "level2": "养殖业",
+      "level3": "生猪养殖"
+    },
+    "is_leader": "1",
+    "fund": {
+      "holding": 81.20803,
+      "change": -121.2563
+    },
+    "northbound": {
+      "holding": 61.27,
+      "change": -24.99
+    }
+  },
+  "peers": [
+    {
+      "code": "000048.SZ",
+      "name": "京基智农",
+      "pe_median": 18.792646,
+      "pe_percentile": 57.9,
+      "is_leader": "是"
+    },
+    {
+      "code": "300498.SZ",
+      "name": "温氏股份",
+      "pe_median": 14.931521,
+      "pe_percentile": 88.0,
+      "is_leader": "3"
+    },
+    {
+      "code": "000735.SZ",
+      "name": "罗 牛 山",
+      "pe_median": 54.758224,
+      "pe_percentile": null,
+      "is_leader": "否"
+    },
+    {
+      "code": "001201.SZ",
+      "name": "东瑞股份",
+      "pe_median": -13.210936,
+      "pe_percentile": null,
+      "is_leader": "否"
+    },
+    {
+      "code": "000876.SZ",
+      "name": "新 希 望",
+      "pe_median": 18.312305,
+      "pe_percentile": null,
+      "is_leader": "1"
+    },
+    {
+      "code": "603477.SH",
+      "name": "巨星农牧",
+      "pe_median": 26.010555,
+      "pe_percentile": null,
+      "is_leader": "否"
+    },
+    {
+      "code": "002124.SZ",
+      "name": "天邦食品",
+      "pe_median": 24.283329,
+      "pe_percentile": null,
+      "is_leader": "9"
+    },
+    {
+      "code": "600975.SH",
+      "name": "新五丰",
+      "pe_median": 24.917229,
+      "pe_percentile": null,
+      "is_leader": "否"
+    },
+    {
+      "code": "603717.SH",
+      "name": "天域生物",
+      "pe_median": -4.3951507,
+      "pe_percentile": null,
+      "is_leader": "否"
+    },
+    {
+      "code": "605296.SH",
+      "name": "神农集团",
+      "pe_median": 33.581043,
+      "pe_percentile": null,
+      "is_leader": "否"
+    }
+  ],
+  "jiuyan": {
+    "available": false,
+    "warning": "韭研公社数据未配置（需登录 Cookie），题材/异动数据不可用"
+  },
+  "_report": "## 牧原股份（002714.SZ）基本面分析\n\n### 一、核心结论\n牧原股份（002714.SZ）是生猪养殖领域的行业龙头，当前 PE 分位合理，公募持仓较高，北向资金有持仓。\n\n### 二、公司基本面\n- **主营业务**: 养殖龙头\n- **行业地位**: 行业龙头\n- **行业分类**: 农林牧渔 → 养殖业 → 生猪养殖\n\n### 三、估值水平\n- **PE 中值**: 19.49\n- **PE 历史分位**: 57.4%（合理）\n\n### 四、资金动向\n- **公募持仓**: 81.21 亿元（减少 121.26 亿）\n- **北向持仓**: 61.27 亿元（减仓 24.99 亿）\n\n### 五、行业地位\n在 生猪养殖 中的 PE 对比：\n\n| 股票 | PE 中值 | PE 分位 | 龙头 |\n|------|---------|---------|------|\n| **牧原股份** | **19.5** | **57.4%** | 是 |\n| 京基智农 | 18.8 | 57.9% | 是 |\n| 温氏股份 | 14.9 | 88.0% |  |\n| 罗 牛 山 | 54.8 | - |  |\n| 东瑞股份 | -13.2 | - |  |\n| 新 希 望 | 18.3 | - | 是 |\n| 巨星农牧 | 26.0 | - |  |\n| 天邦食品 | 24.3 | - |  |\n| 新五丰 | 24.9 | - |  |\n\n### 六、韭研公社题材参考\n*韭研公社数据未配置（需登录 Cookie），题材/异动数据不可用*\n\n### 七、投资亮点与风险\n- **亮点**:\n  1. 行业龙头，生猪养殖领域领先企业\n  1. 公募基金重仓（81.21 亿元）\n  1. 北向资金持仓（61.27 亿元）\n- **风险**:\n  1. 公募基金大幅减仓（121.26 亿元）\n  1. 北向资金近期减仓（24.99 亿元）\n\n---\n\n### 📌 数据来源\n- 行业/资金/描述/同行业对比：本地知识库 stocks_db（PostgreSQL）\n- PE 估值（TTM，近五年分位）：AKShare 百度股市通（`check_pe_quality.py` 实时查询）\n",
+  "cached_at": 1782874884.206343
+}

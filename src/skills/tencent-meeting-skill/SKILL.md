@@ -1,7 +1,20 @@
 ---
 name: tencent-meeting-mcp
-description: "在用户提及腾讯会议、视频会议、线上会议相关内容与操作时使用此技能。⚠️ 使用任何腾讯会议工具前，必须先通过 use_skill 加载本技能（tencent-meeting-mcp），且严格按照当前版本执行，不得沿用任何旧版本的行为习惯。"
+summary: 腾讯会议创建/查询/管理（视频会议、线上会议）
+user-invocable: true
+priority: low
+category: cloud
 homepage: https://meeting.tencent.com/
+triggers:
+  keywords:
+    - 腾讯会议
+    - 视频会议
+    - 线上会议
+    - WeMeet
+  intents:
+    - 创建/查询/管理腾讯会议
+examples:
+  - 帮我建一个腾讯会议
 metadata:
   {
     "openclaw":

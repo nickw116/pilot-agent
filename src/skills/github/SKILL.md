@@ -1,6 +1,22 @@
 ---
 name: github
-description: "Interact with GitHub using the `gh` CLI. Use `gh issue`, `gh pr`, `gh run`, and `gh api` for issues, PRs, CI runs, and advanced queries."
+summary: 通过 gh CLI 操作 GitHub（issues/PR/runs/api）
+user-invocable: false
+priority: low
+category: dev
+triggers:
+  keywords:
+    - GitHub
+    - gh
+    - PR
+    - issue
+    - workflow
+    - CI
+  intents:
+    - 查/建/改 GitHub issue 或 PR
+    - 查 CI 状态、workflow 日志
+examples:
+  - 看下 owner/repo 最新 PR 的 CI 状态
 ---
 
 # GitHub Skill

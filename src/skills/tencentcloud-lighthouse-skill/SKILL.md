@@ -1,6 +1,20 @@
 ---
 name: tencentcloud-lighthouse-skill
-description: Manage Tencent Cloud Lighthouse (轻量应用服务器) — auto-setup mcporter + MCP, query instances, monitoring & alerting, self-diagnostics, firewall, snapshots, remote command execution (TAT). Use when user asks about Lighthouse or 轻量应用服务器. NOT for CVM or other cloud server types.
+summary: 腾讯云 Lighthouse 轻量应用服务器管理（实例/监控/防火墙/快照/远程命令）
+user-invocable: true
+priority: low
+category: cloud
+triggers:
+  keywords:
+    - Lighthouse
+    - 轻量应用服务器
+    - 轻量服务器
+  intents:
+    - 管理腾讯云 Lighthouse 实例
+not_for:
+  - CVM 或其他类型云服务器
+examples:
+  - 看下我的轻量服务器状态
 metadata:
   {
     "openclaw":

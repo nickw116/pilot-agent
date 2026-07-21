@@ -1,0 +1,101 @@
+{
+  "stock": {
+    "code": "003020.SZ",
+    "name": "立方制药",
+    "description": null,
+    "pe_median": 23.349867,
+    "pe_percentile": 73.2,
+    "industry": {
+      "level1": "医药生物",
+      "level2": "化学制药",
+      "level3": "化学制剂"
+    },
+    "is_leader": "否",
+    "fund": {
+      "holding": 0.2842938,
+      "change": -0.21653208
+    },
+    "northbound": {
+      "holding": 0.3,
+      "change": 0.25
+    }
+  },
+  "peers": [
+    {
+      "code": "688428.SH",
+      "name": "诺诚健华",
+      "pe_median": -33.41663,
+      "pe_percentile": 0.0,
+      "is_leader": "否"
+    },
+    {
+      "code": "688221.SH",
+      "name": "前沿生物-U",
+      "pe_median": -19.503262,
+      "pe_percentile": 0.0,
+      "is_leader": "否"
+    },
+    {
+      "code": "300573.SZ",
+      "name": "兴齐眼药",
+      "pe_median": 62.47205,
+      "pe_percentile": 0.3,
+      "is_leader": "是"
+    },
+    {
+      "code": "688578.SH",
+      "name": "艾力斯",
+      "pe_median": 27.263227,
+      "pe_percentile": 0.8,
+      "is_leader": "是"
+    },
+    {
+      "code": "600062.SH",
+      "name": "华润双鹤",
+      "pe_median": 23.644726,
+      "pe_percentile": 0.9,
+      "is_leader": "是"
+    },
+    {
+      "code": "002437.SZ",
+      "name": "誉衡药业",
+      "pe_median": 34.05241,
+      "pe_percentile": 2.1,
+      "is_leader": "否"
+    },
+    {
+      "code": "002393.SZ",
+      "name": "力生制药",
+      "pe_median": 30.389011,
+      "pe_percentile": 3.7,
+      "is_leader": "否"
+    },
+    {
+      "code": "300705.SZ",
+      "name": "九典制药",
+      "pe_median": 36.532322,
+      "pe_percentile": 5.3,
+      "is_leader": "否"
+    },
+    {
+      "code": "600267.SH",
+      "name": "海正药业",
+      "pe_median": 37.30241,
+      "pe_percentile": 5.4,
+      "is_leader": "否"
+    },
+    {
+      "code": "000963.SZ",
+      "name": "华东医药",
+      "pe_median": 32.32721,
+      "pe_percentile": 5.6,
+      "is_leader": "是"
+    }
+  ],
+  "jiuyan": {
+    "available": false,
+    "warning": "韭研公社数据未配置（需登录 Cookie），题材/异动数据不可用"
+  },
+  "_report": "## 立方制药（003020.SZ）基本面分析\n\n### 一、核心结论\n立方制药（003020.SZ）属于医药生物 → 化学制药 → 化学制剂行业，当前 PE 分位偏高。\n\n### 二、公司基本面\n- **主营业务**: 暂无描述\n- **行业分类**: 医药生物 → 化学制药 → 化学制剂\n\n### 三、估值水平\n- **PE 中值**: 23.35\n- **PE 历史分位**: 73.2%（偏高）\n\n### 四、资金动向\n- **公募持仓**: 0.28 亿元（减少 0.22 亿）\n- **北向持仓**: 0.30 亿元（加仓 0.25 亿）\n\n### 五、行业地位\n在 化学制剂 中的 PE 对比：\n\n| 股票 | PE 中值 | PE 分位 | 龙头 |\n|------|---------|---------|------|\n| **立方制药** | **23.3** | **73.2%** |  |\n| 诺诚健华 | -33.4 | - |  |\n| 前沿生物-U | -19.5 | - |  |\n| 兴齐眼药 | 62.5 | 0.3% | 是 |\n| 艾力斯 | 27.3 | 0.8% | 是 |\n| 华润双鹤 | 23.6 | 0.9% | 是 |\n| 誉衡药业 | 34.1 | 2.1% |  |\n| 力生制药 | 30.4 | 3.7% |  |\n| 九典制药 | 36.5 | 5.3% |  |\n\n### 六、韭研公社题材参考\n*韭研公社数据未配置（需登录 Cookie），题材/异动数据不可用*\n\n### 七、投资亮点与风险\n- **亮点**:\n  1. 北向资金近期加仓\n- **风险**:\n  1. 估值偏高（PE 分位 73.2%）\n  1. 缺少主营业务描述，信息不完整\n\n---\n\n### 📌 数据来源\n- 行业/资金/描述/同行业对比：本地知识库 stocks_db（PostgreSQL）\n- PE 估值（TTM，近五年分位）：AKShare 百度股市通（`check_pe_quality.py` 实时查询）\n",
+  "cached_at": 1783987637.300917
+}

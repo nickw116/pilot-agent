@@ -3,73 +3,13 @@ import fs from "fs";
 import path from "path";
 import { Type, type Static, type TSchema } from "@mariozechner/pi-ai";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
-import { AcpClient, type AcpLogEvent } from "./acp-client.js";
-import { publish } from "./sse.js";
-import { appendAcpLog } from "./session.js";
-import { loadAllSkills, loadSkillContent } from "./skills/index.js";
+import { loadSkillContent } from "./skills/index.js";
 import {
   appendToLongTermMemory,
   appendDailyNote,
   searchMemory as searchMemoryFiles,
 } from "./memory.js";
-import {
-  snapshotWorkspace,
-  findChangedFiles,
-  callMimoReview,
-} from "./review.js";
 import { ensureBootstrapFiles } from "./bootstrap.js";
-import { startAgentWork, logAgentWork, endAgentWork } from "./agent-tracker.js";
-
-let currentSseSessionKey: string | null = null;
-let currentSseRunId: string | null = null;
-let acpLogSeq = 0;
-
-export function setAcpSseContext(sessionKey: string, runId: string): void {
-  currentSseSessionKey = sessionKey;
-  currentSseRunId = runId;
-  acpLogSeq = 0;
-}
-
-export function clearAcpSseContext(): void {
-  currentSseSessionKey = null;
-  currentSseRunId = null;
-}
-
-const SKIP_PERSIST_TYPES = new Set(["text_delta", "reasoning"]);
-
-function publishAcpLog(event: AcpLogEvent): void {
-  if (!currentSseSessionKey || !currentSseRunId) return;
-  const seq = acpLogSeq++;
-  publish(currentSseSessionKey, {
-    eventId: "",
-    kind: "acp.log_event",
-    runId: currentSseRunId,
-    sessionKey: currentSseSessionKey,
-    payload: {
-      type: event.type,
-      tool: event.tool || null,
-      text: event.text,
-      detail: event.detail || null,
-      durationMs: event.durationMs || null,
-    },
-  });
-  // Forward delegate:* tool logs to agent tracker
-  if (event.tool?.startsWith("delegate:")) {
-    const agentId = event.tool.replace("delegate:", "");
-    logAgentWork(currentSseSessionKey, agentId, {
-      type: event.type,
-      tool: event.tool,
-      text: event.text,
-      durationMs: event.durationMs,
-    });
-  }
-  if (SKIP_PERSIST_TYPES.has(event.type)) return;
-  try {
-    appendAcpLog(currentSseSessionKey, currentSseRunId, event, seq);
-  } catch (err) {
-    console.error("[acp] failed to persist log:", err);
-  }
-}
 
 const DEFAULT_WORKSPACE = path.resolve(
   process.env.WORKSPACE_DIR ||
@@ -139,7 +79,7 @@ function makeResolve(workspaceRoot: string) {
   };
 }
 
-export function createUserTools(workspaceRoot: string, allowedTools?: string[], getImages?: () => { data: string; mimeType: string }[] | undefined, delegateFn?: (agentId: string, task: string, context?: string) => Promise<string>, subAgentIds?: string[], currentAgentId?: string): { tools: AgentTool<TSchema, string | Record<string, unknown>>[]; dispose: () => Promise<void> } {
+export function createUserTools(workspaceRoot: string, allowedTools?: string[], currentAgentId?: string): { tools: AgentTool<TSchema, string | Record<string, unknown>>[]; dispose: () => Promise<void> } {
   ensureWorkspace(workspaceRoot);
   const resolve = makeResolve(workspaceRoot);
 
@@ -269,92 +209,13 @@ export function createUserTools(workspaceRoot: string, allowedTools?: string[], 
     });
   }
 
-  let acpClient: AcpClient | null = null;
-  let acpReady = false;
-
-  async function ensureAcp(): Promise<AcpClient> {
-    if (acpClient && acpReady && acpClient.isReady()) return acpClient;
-    if (acpClient) {
-      await acpClient.stop().catch(() => {});
-    }
-    acpClient = new AcpClient();
-    acpClient.setLogHandler(publishAcpLog);
-    await acpClient.start(workspaceRoot, (method, params) => {
-      console.debug("[acp] notification:", method, JSON.stringify(params).slice(0, 200));
-    });
-    acpReady = true;
-    return acpClient;
-  }
-
-  let claudeAcpClient: AcpClient | null = null;
-  let claudeAcpReady = false;
-
-  async function ensureClaudeAcp(): Promise<AcpClient> {
-    if (claudeAcpClient && claudeAcpReady && claudeAcpClient.isReady()) return claudeAcpClient;
-    if (claudeAcpClient) {
-      await claudeAcpClient.stop().catch(() => {});
-    }
-    claudeAcpClient = new AcpClient({
-      command: process.env.CLAUDE_CODE_ACP_COMMAND || process.execPath,
-      args: process.env.CLAUDE_CODE_ACP_ARGS?.split(" ") || [
-        "/home/ubuntu/.openclaw/npm/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js",
-      ],
-      clientInfo: { name: "pilot-agent-claude", title: "Pilot Agent (Claude)", version: "0.1.0" },
-    });
-    claudeAcpClient.setLogHandler(publishAcpLog);
-    await claudeAcpClient.start(workspaceRoot, (method, params) => {
-      console.debug("[claude-acp] notification:", method, JSON.stringify(params).slice(0, 200));
-    });
-    claudeAcpReady = true;
-    return claudeAcpClient;
-  }
-
-  const OpenCodeParams = Type.Object({
-    prompt: Type.String({ description: "The coding task or question to send to opencode" }),
+  const SkillParams = Type.Object({
+    id: Type.String({ description: "Skill ID to load (e.g. 'github', 'stock-chart-analysis', 'frontend-spec')" }),
   });
 
-  async function doOpenCode(
-    params: Static<typeof OpenCodeParams>,
-    signal?: AbortSignal
-  ): Promise<AgentToolResult<string>> {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const client = await ensureAcp();
-        const images = getImages?.();
-        const result = await client.prompt(params.prompt, images);
-        const text = result.content || "(opencode completed with no text output)";
-        return {
-          content: [{ type: "text", text }],
-          details: text,
-        };
-      } catch (err: any) {
-        const msg = err?.message || String(err);
-        if (msg.includes("ENOENT") || msg.includes("spawn")) {
-          return {
-            content: [{ type: "text", text: "opencode 命令未找到。请确认 opencode 已安装并在 PATH 中。" }],
-            details: "opencode not found",
-          };
-        }
-        if ((msg.includes("timeout") || msg.includes("ACP process exited")) && attempt === 0) {
-          console.warn("[acp] opencode failure, restarting client and retrying...");
-          acpReady = false;
-          if (acpClient) await acpClient.stop().catch(() => {});
-          continue;
-        }
-        return {
-          content: [{ type: "text", text: `opencode 错误: ${msg}` }],
-          details: msg,
-        };
-      }
-    }
-    return {
-      content: [{ type: "text", text: "opencode 错误: 重试后仍然超时" }],
-      details: "timeout after retry",
-    };
-  }
-
-  function getAcpClientInner(): AcpClient | null {
-    return acpClient && acpReady ? acpClient : null;
+  function doSkill(params: Static<typeof SkillParams>): AgentToolResult<string> {
+    const content = loadSkillContent(params.id, currentAgentId);
+    return { content: [{ type: "text", text: content }], details: content };
   }
 
   const tools: AgentTool<TSchema, string | Record<string, unknown>>[] = [
@@ -386,252 +247,14 @@ export function createUserTools(workspaceRoot: string, allowedTools?: string[], 
       label: "Bash",
       execute: (_id, params, signal) => doBash(params as Static<typeof BashParams>, signal),
     },
+    {
+      name: "skill",
+      description: "Load a skill's full knowledge and reference docs. Use this to get detailed instructions before executing skill-related tasks. Available skill IDs are listed in your system prompt under '可用 Skills'.",
+      parameters: SkillParams,
+      label: "Skill",
+      execute: (_id, params) => Promise.resolve(doSkill(params as Static<typeof SkillParams>)),
+    },
   ];
-
-  if (process.env.OPENCODE_ENABLED === "true" || process.env.OPENCODE_ACP_COMMAND) {
-    tools.push({
-      name: "opencode",
-      description: "Delegate a coding task to opencode (a powerful AI coding agent with ACP protocol). Use this for complex code changes, refactoring, debugging, or multi-file edits that benefit from LSP-aware code understanding. opencode can read/write files, run commands, and interact with you. Provide a clear description of what needs to be done.",
-      parameters: OpenCodeParams,
-      label: "OpenCode",
-      execute: (_id, params, signal) => doOpenCode(params as Static<typeof OpenCodeParams>, signal),
-    });
-  }
-
-  const ClaudeCodeParams = Type.Object({
-    prompt: Type.String({ description: "The coding task or question to send to Claude Code" }),
-  });
-
-  async function doClaudeCode(
-    params: Static<typeof ClaudeCodeParams>,
-    signal?: AbortSignal
-  ): Promise<AgentToolResult<string>> {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const client = await ensureClaudeAcp();
-        const images = getImages?.();
-        const result = await client.prompt(params.prompt, images);
-        const text = result.content || "(Claude Code completed with no text output)";
-        return {
-          content: [{ type: "text", text }],
-          details: text,
-        };
-      } catch (err: any) {
-        const msg = err?.message || String(err);
-        if (msg.includes("ENOENT") || msg.includes("spawn")) {
-          return {
-            content: [{ type: "text", text: "Claude Code ACP 未找到。请确认 @agentclientprotocol/claude-agent-acp 已安装。" }],
-            details: "claude-agent-acp not found",
-          };
-        }
-        if ((msg.includes("timeout") || msg.includes("ACP process exited")) && attempt === 0) {
-          console.warn("[claude-acp] failure, restarting client and retrying...");
-          claudeAcpReady = false;
-          if (claudeAcpClient) await claudeAcpClient.stop().catch(() => {});
-          continue;
-        }
-        return {
-          content: [{ type: "text", text: `Claude Code 错误: ${msg}` }],
-          details: msg,
-        };
-      }
-    }
-    return {
-      content: [{ type: "text", text: "Claude Code 错误: 重试后仍然超时" }],
-      details: "timeout after retry",
-    };
-  }
-
-  if (process.env.CLAUDE_CODE_DISABLED !== "true") {
-    const REVIEW_ENABLED = process.env.REVIEW_ENABLED !== "false";
-    const MAX_REVIEW_ROUNDS = 2;
-
-    async function doClaudeCodeWithReview(
-      params: Static<typeof ClaudeCodeParams>,
-      signal?: AbortSignal
-    ): Promise<AgentToolResult<string>> {
-      const snapshot = REVIEW_ENABLED
-        ? snapshotWorkspace(workspaceRoot)
-        : null;
-
-      let result = await doClaudeCode(params, signal);
-
-      if (!snapshot) return result;
-
-      const changes = findChangedFiles(workspaceRoot, snapshot);
-      if (changes.length === 0) return result;
-
-      for (let round = 0; round < MAX_REVIEW_ROUNDS; round++) {
-        if (signal?.aborted) break;
-
-        publishAcpLog({
-          type: "tool_start",
-          tool: "mimo_review",
-          text: `MIMO 自动 Review 第 ${round + 1} 轮 (${changes.length} 个文件)`,
-        });
-
-        const resultText = result.content
-          .map((c: any) => (c.type === "text" ? c.text : ""))
-          .join("");
-        const review = await callMimoReview(
-          params.prompt,
-          resultText,
-          changes
-        );
-
-        publishAcpLog({
-          type: "tool_end",
-          tool: "mimo_review",
-          text: review.hasIssues
-            ? "发现问题，反馈给 Claude Code 自动修复..."
-            : "✅ 代码质量良好",
-        });
-
-        if (!review.hasIssues) {
-          const text =
-            resultText +
-            `\n\n--- MIMO Review ✅ ---\n${review.review}`;
-          return { content: [{ type: "text", text }], details: result.details };
-        }
-
-        const fixPrompt = `你之前的代码修改经过了 MIMO 自动 Review，发现以下问题，请立即修复：
-
-${review.review}
-
-请直接修复所有问题，修改完成后简要说明修复了什么。`;
-
-        const newSnapshot = snapshotWorkspace(workspaceRoot);
-        result = await doClaudeCode({ prompt: fixPrompt }, signal);
-
-        const newChanges = findChangedFiles(workspaceRoot, newSnapshot);
-        if (newChanges.length === 0) break;
-        changes.length = 0;
-        changes.push(...newChanges);
-      }
-
-      return result;
-    }
-
-    tools.push({
-      name: "claude_code",
-      description:
-        "Delegate a coding task to Claude Code (Anthropic's AI coding agent via ACP protocol). Use this for complex code analysis, refactoring, debugging, or multi-file edits. Claude Code can read/write files, run commands, and interact with you. After Claude Code completes, MIMO automatically reviews the changes and feeds back issues for self-fixing. Provide a clear description of what needs to be done.",
-      parameters: ClaudeCodeParams,
-      label: "Claude Code",
-      execute: (_id, params, signal) =>
-        doClaudeCodeWithReview(
-          params as Static<typeof ClaudeCodeParams>,
-          signal
-        ),
-    });
-  }
-
-  const SkillParams = Type.Object({
-    id: Type.String({ description: "Skill ID to load (e.g. 'github', 'stock-chart-analysis', 'frontend-spec')" }),
-  });
-
-  function doSkill(params: Static<typeof SkillParams>): AgentToolResult<string> {
-    const content = loadSkillContent(params.id, currentAgentId);
-    return { content: [{ type: "text", text: content }], details: content };
-  }
-
-  tools.push({
-    name: "skill",
-    description: "Load a skill's full knowledge and reference docs. Use this to get detailed instructions before executing skill-related tasks. Available skill IDs are listed in your system prompt under '可用 Skills'.",
-    parameters: SkillParams,
-    label: "Skill",
-    execute: (_id, params) => Promise.resolve(doSkill(params as Static<typeof SkillParams>)),
-  });
-
-  // --- Delegate tool (for orchestrator agent) ---
-
-  if (delegateFn) {
-    const agentIdLiterals = (subAgentIds || []).map(id => Type.Literal(id));
-    const DelegateAgentId = agentIdLiterals.length === 1
-      ? agentIdLiterals[0]
-      : Type.Union(agentIdLiterals, { description: `Sub-agent to delegate to: ${(subAgentIds || []).join(", ") || "none"}` });
-
-    const DelegateParams = Type.Object({
-      agent_id: DelegateAgentId,
-      task: Type.String({ description: "Clear description of the task to delegate" }),
-      context: Type.Optional(Type.String({ description: "Additional context for the sub-agent" })),
-    });
-
-    tools.push({
-      name: "delegate",
-      description: "Delegate a task to a specialized sub-agent. Use 'dev' for complex coding tasks (via Claude Code). Use 'user' for personal assistant tasks like data analysis, stock analysis, content creation.",
-      parameters: DelegateParams,
-      label: "Delegate",
-      execute: async (_id, params, signal) => {
-        const p = params as Static<typeof DelegateParams>;
-        publishAcpLog({
-          type: "tool_start",
-          tool: `delegate:${p.agent_id}`,
-          text: `委派任务给 ${p.agent_id} agent: ${p.task.slice(0, 100)}...`,
-        });
-        // Start tracking for dev agent (user is tracked in runSubAgent)
-        if (p.agent_id === "dev" && currentSseSessionKey) {
-          startAgentWork(currentSseSessionKey, "dev", p.task);
-        }
-        try {
-          let result = "";
-          if (p.agent_id === "dev") {
-            // dev agent: use claude_code ACP directly, with retry
-            const devPrompt = p.context ? `${p.task}\n\n## 附加上下文\n${p.context}` : p.task;
-            for (let attempt = 0; attempt < 2; attempt++) {
-              try {
-                const client = await ensureClaudeAcp();
-                const devResult = await client.prompt(devPrompt);
-                result = devResult.content || "(Claude Code completed with no text output)";
-                break;
-              } catch (retryErr: any) {
-                const retryMsg = retryErr?.message || String(retryErr);
-                if (retryMsg.includes("ENOENT") || retryMsg.includes("spawn")) {
-                  throw retryErr;
-                }
-                if ((retryMsg.includes("timeout") || retryMsg.includes("ACP process exited")) && attempt === 0) {
-                  console.warn("[claude-acp] delegate→dev failure, restarting client and retrying...");
-                  claudeAcpReady = false;
-                  if (claudeAcpClient) await claudeAcpClient.stop().catch(() => {});
-                  continue;
-                }
-                throw retryErr;
-              }
-            }
-          } else {
-            // user: use sub-agent via delegateFn
-            result = await delegateFn(p.agent_id, p.task, p.context);
-          }
-          publishAcpLog({
-            type: "tool_end",
-            tool: `delegate:${p.agent_id}`,
-            text: `子 agent 完成 (${result.length} 字)`,
-          });
-          if (p.agent_id === "dev" && currentSseSessionKey) {
-            endAgentWork(currentSseSessionKey, "dev", "completed");
-          }
-          return {
-            content: [{ type: "text", text: result }],
-            details: result,
-          };
-        } catch (err: any) {
-          const msg = err?.message || String(err);
-          publishAcpLog({
-            type: "tool_end",
-            tool: `delegate:${p.agent_id}`,
-            text: `子 agent 错误: ${msg}`,
-          });
-          if (p.agent_id === "dev" && currentSseSessionKey) {
-            endAgentWork(currentSseSessionKey, "dev", "error", msg);
-          }
-          return {
-            content: [{ type: "text", text: `子 agent 错误: ${msg}` }],
-            details: `error: ${msg}`,
-          };
-        }
-      },
-    });
-  }
 
   // --- Memory tools (always available, not filtered) ---
 
@@ -691,25 +314,14 @@ ${review.review}
   filtered.push(...memoryTools);
 
   async function dispose(): Promise<void> {
-    if (acpClient) {
-      await acpClient.dispose().catch(() => {});
-      acpClient = null;
-      acpReady = false;
-    }
-    if (claudeAcpClient) {
-      await claudeAcpClient.dispose().catch(() => {});
-      claudeAcpClient = null;
-      claudeAcpReady = false;
-    }
+    // Nothing to clean up in the single-agent, non-ACP architecture.
   }
 
   return { tools: filtered, dispose };
 }
 
-export const tools = createUserTools(DEFAULT_WORKSPACE).tools;
-
 export function getAgentDir(agentId?: string): string {
-  const resolvedAgent = agentId || "main";
+  const resolvedAgent = agentId || "user";
   return path.join(DEFAULT_WORKSPACE, resolvedAgent);
 }
 
@@ -751,7 +363,7 @@ function migrateOldWorkspace(userId: number, agentId: string): void {
 }
 
 export function getUserWorkspaceDir(userId: number, agentId?: string): string {
-  const resolvedAgent = agentId || "main";
+  const resolvedAgent = agentId || "user";
   migrateOldWorkspace(userId, resolvedAgent);
   return path.join(DEFAULT_WORKSPACE, resolvedAgent, `user-${userId}`);
 }

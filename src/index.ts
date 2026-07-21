@@ -23,6 +23,11 @@ import { transcribeAudio, describeVideo } from "./media-provider.js";
 import { appendDailyNote } from "./memory.js";
 import { getUserWorkspaceDir } from "./tools.js";
 import { getAgentWorkSnapshot } from "./agent-tracker.js";
+import { getAgentTypes, getDefaultAgentType, getAgentType } from "./agent-types.js";
+
+// Wire up run-liveness checker so getSessionStatus() can self-heal stale
+// "generating" rows left over from crashed / interrupted runs.
+sessionMod.setRunLivenessChecker(agentModule.isRunActive);
 
 const PORT = parseInt(process.env.PORT || "8081", 10);
 
@@ -95,9 +100,13 @@ app.get("/api/agents", auth, (req, res) => {
   res.json({ agents: agentModule.getAgentList(allowedIds) });
 });
 
+app.get("/api/agent-types", auth, (_req, res) => {
+  res.json({ agentTypes: getAgentTypes(), default: getDefaultAgentType().id });
+});
+
 app.get("/api/session", auth, (req, res) => {
   const user = (req as any).user;
-  const agentId = user.role === "admin" ? "main" : "user";
+  const agentId = "user";
   const s = sessionMod.getOrCreateActiveSession(user.userId, user.username, agentId);
   res.json({ sessionKey: s.session_key });
 });
@@ -109,6 +118,7 @@ app.get("/api/sessions", auth, (req, res) => {
     sessionKey: s.session_key,
     title: s.title,
     agentId: s.agent_id,
+    agentType: (s as any).agent_type || "securities",
     createdAt: s.created_at,
     active: s.active === 1,
   }));
@@ -161,13 +171,19 @@ app.delete("/api/session/:sessionKey", auth, (req, res) => {
   res.json({ ok: true });
 });
 
-function resolveAgentId(user: any): string {
-  return user.role === "admin" ? "main" : "user";
+function resolveAgentId(_user: any): string {
+  return "user";
+}
+
+function resolveAgentType(agentType?: string): string {
+  if (agentType && getAgentType(agentType)) return agentType;
+  return getDefaultAgentType().id;
 }
 
 app.post("/api/session/new", auth, (req, res) => {
   const user = (req as any).user;
   const aid = resolveAgentId(user);
+  const atype = resolveAgentType(req.body?.agent_type);
 
   // Memory flush: save old session's recent context before creating a new one
   try {
@@ -188,15 +204,16 @@ app.post("/api/session/new", auth, (req, res) => {
     console.error("[memory] new-session flush failed:", err);
   }
 
-  const s = sessionMod.createSession(user.userId, user.username, aid);
-  res.json({ sessionKey: s.session_key });
+  const s = sessionMod.createSession(user.userId, user.username, aid, atype);
+  res.json({ sessionKey: s.session_key, agentType: atype });
 });
 
 app.post("/api/sessions", auth, (req, res) => {
   const user = (req as any).user;
   const aid = resolveAgentId(user);
-  const s = sessionMod.createSession(user.userId, user.username, aid);
-  res.json({ sessionKey: s.session_key });
+  const atype = resolveAgentType(req.body?.agent_type);
+  const s = sessionMod.createSession(user.userId, user.username, aid, atype);
+  res.json({ sessionKey: s.session_key, agentType: atype });
 });
 
 app.put("/api/sessions/active", auth, (req, res) => {
@@ -228,8 +245,8 @@ app.post("/api/chat/v2", auth, async (req, res) => {
   if (!checkRateLimit(user.userId)) {
     return res.status(429).json({ detail: "请求过于频繁，请稍后再试" });
   }
-  const { message, session_key, images, videos, audios } = req.body || {};
-  console.log(`[chat/v2] message=${(message || "").slice(0, 80)} images=${images?.length || 0} videos=${videos?.length || 0} audios=${audios?.length || 0} session=${session_key}`);
+  const { message, session_key, images, videos, audios, agent_type } = req.body || {};
+  console.log(`[chat/v2] message=${(message || "").slice(0, 80)} images=${images?.length || 0} videos=${videos?.length || 0} audios=${audios?.length || 0} session=${session_key} agentType=${agent_type || "(from session)"}`);
   if (!message) return res.status(400).json({ detail: "No message" });
 
   // Resolve session — admin can send to any session (gateway mode)
@@ -245,6 +262,7 @@ app.post("/api/chat/v2", auth, async (req, res) => {
   }
   const sk = s.session_key;
   const agentId = s.agent_id || resolveAgentId(user);
+  const resolvedAgentType = agent_type || s.agent_type || resolveAgentType();
 
   const imageContent = Array.isArray(images) && images.length > 0
     ? images.map((img: any) => ({
@@ -263,7 +281,7 @@ app.post("/api/chat/v2", auth, async (req, res) => {
     : undefined;
 
   // Fire-and-forget (runId available immediately)
-  const runId = agentModule.runPrompt(message, sk, user.userId, agentId, imageContent, videoContent, audioContent);
+  const runId = agentModule.runPrompt(message, sk, user.userId, agentId, resolvedAgentType, imageContent, videoContent, audioContent);
   res.json({ ok: true, sessionKey: sk, runId: await runId });
 });
 
@@ -272,8 +290,8 @@ app.post("/api/chat", auth, async (req, res) => {
   if (!checkRateLimit(user.userId)) {
     return res.status(429).json({ detail: "请求过于频繁，请稍后再试" });
   }
-  const { message, session_key, images, videos, audios } = req.body || {};
-  console.log(`[chat] message=${(message || "").slice(0, 80)} images=${images?.length || 0} videos=${videos?.length || 0} audios=${audios?.length || 0} session=${session_key}`);
+  const { message, session_key, images, videos, audios, agent_type } = req.body || {};
+  console.log(`[chat] message=${(message || "").slice(0, 80)} images=${images?.length || 0} videos=${videos?.length || 0} audios=${audios?.length || 0} session=${session_key} agentType=${agent_type || "(from session)"}`);
   if (!message) return res.status(400).json({ detail: "No message" });
 
   let s: any = null;
@@ -288,6 +306,7 @@ app.post("/api/chat", auth, async (req, res) => {
   }
   const sk = s.session_key;
   const agentId = s.agent_id || resolveAgentId(user);
+  const resolvedAgentType = agent_type || s.agent_type || resolveAgentType();
 
   const imageContent = Array.isArray(images) && images.length > 0
     ? images.map((img: any) => ({
@@ -305,7 +324,7 @@ app.post("/api/chat", auth, async (req, res) => {
     ? audios.map((a: any) => ({ data: a.data, mimeType: a.mimeType }))
     : undefined;
 
-  const runId = await agentModule.runPrompt(message, sk, user.userId, agentId, imageContent, videoContent, audioContent);
+  const runId = await agentModule.runPrompt(message, sk, user.userId, agentId, resolvedAgentType, imageContent, videoContent, audioContent);
   res.json({ ok: true, sessionKey: sk, runId });
 });
 
@@ -430,6 +449,9 @@ app.get("/api/history", auth, (req, res) => {
   const limit = Math.max(1, Math.min(500, parseInt(req.query.limit as string, 10) || 200));
   const messages = sessionMod.loadContext(sessionKey, limit);
   const status = sessionMod.getSessionStatus(sessionKey);
+  const session = sessionMod.getSession(sessionKey);
+  const title = session ? session.title : "";
+  const agentType = session ? ((session as any).agent_type || "securities") : "securities";
   const entries = messages.map((m) => {
     let acpLogs: sessionMod.AcpLogRow[] = [];
     if (m.role === "assistant" && m.runId) {
@@ -455,6 +477,8 @@ app.get("/api/history", auth, (req, res) => {
   res.json({
     entries,
     messages: entries,
+    title,
+    agentType,
     status: status ? { status: status.status, runId: status.runId, error: status.error } : { status: "idle" },
   });
 });
@@ -482,6 +506,17 @@ app.post("/api/model/switch", auth, (req, res) => {
   const ok = agentModule.switchModel(session_key, model, user.userId);
   if (!ok) return res.status(400).json({ detail: "Unknown model" });
   res.json({ ok: true, model });
+});
+
+app.post("/api/session/agent-type", auth, (req, res) => {
+  const { session_key, agent_type } = req.body || {};
+  if (!session_key || !agent_type) {
+    return res.status(400).json({ detail: "Missing session_key or agent_type" });
+  }
+  const atype = resolveAgentType(agent_type);
+  const ok = sessionMod.updateSessionAgentType(session_key, atype);
+  if (!ok) return res.status(404).json({ detail: "Session not found" });
+  res.json({ ok: true, agentType: atype });
 });
 
 // --- File transfer ---
@@ -625,6 +660,46 @@ app.get("/api/local-file", auth, (req, res) => {
   res.sendFile(resolved);
 });
 
+// Resolve an `attachment://<filename>` reference by searching the requesting
+// user's workspace. Lets the frontend recover charts/images the agent emitted
+// with the (unsupported) attachment:// pseudo-protocol instead of a full path.
+const IMAGE_EXTS = /\.(jpe?g|png|gif|webp|svg|bmp|ico|pdf)$/i;
+app.get("/api/resolve-attachment", auth, (req, res) => {
+  const name = (req.query.name as string || "").trim();
+  if (!name) return res.status(400).json({ detail: "Missing name" });
+  // Block path separators in the lookup key — only a bare filename is allowed.
+  if (name.includes("/") || name.includes("..") || name.includes(path.sep)) {
+    return res.status(400).json({ detail: "Invalid name" });
+  }
+
+  const user = (req as any).user;
+  const wsDir = getUserWorkspaceDir(user.userId, "user");
+  if (!fs.existsSync(wsDir)) return res.status(404).json({ detail: "Not found" });
+
+  // Recursive breadth-first search, capped for safety.
+  const queue: string[] = [wsDir];
+  const MAX_VISITED = 5000;
+  let visited = 0;
+  while (queue.length && visited < MAX_VISITED) {
+    const dir = queue.shift()!;
+    visited++;
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+    catch { continue; }
+    for (const ent of entries) {
+      const full = path.join(dir, ent.name);
+      if (ent.isDirectory()) {
+        // Skip noise dirs
+        if (ent.name === "node_modules" || ent.name === ".git") continue;
+        queue.push(full);
+      } else if (ent.name === name && IMAGE_EXTS.test(ent.name)) {
+        return res.sendFile(full);
+      }
+    }
+  }
+  return res.status(404).json({ detail: "Not found" });
+});
+
 // --- Context stats ---
 
 app.get("/api/context/stats", auth, (req, res) => {
@@ -638,7 +713,7 @@ app.get("/api/context/stats", auth, (req, res) => {
 
 app.get("/api/agent-dashboard", auth, (req, res) => {
   const user = (req as any).user;
-  if (user.allowedAgent !== 'main' && user.allowedAgent !== 'dev') {
+  if (user.role !== 'admin') {
     res.status(403).json({ error: 'Forbidden' });
     return;
   }
@@ -651,6 +726,7 @@ app.get("/api/agent-dashboard", auth, (req, res) => {
 // --- Health ---
 
 app.get("/api/health", (_req, res) => {
+  res.set("Cache-Control", "no-store");
   res.json({ status: "ok", version: "0.3.0" });
 });
 

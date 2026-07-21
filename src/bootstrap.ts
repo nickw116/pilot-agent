@@ -32,14 +32,12 @@ export function ensureAgentBootstrapFiles(agentDir: string, agentId: string): vo
   const sourceDir = getSourceDir(agentId);
 
   for (const file of AGENT_BOOTSTRAP_FILES) {
-    const targetPath = path.join(agentDir, file);
-    if (fs.existsSync(targetPath)) continue; // don't overwrite runtime customizations
-
-    // Try source file first, fallback to empty
+    // Source-controlled shared files: always overwrite the runtime copy so edits
+    // to src/agents/<id>/ propagate. Only skip when no source file exists.
     const sourcePath = path.join(sourceDir, file);
-    if (fs.existsSync(sourcePath)) {
-      fs.copyFileSync(sourcePath, targetPath);
-    }
+    if (!fs.existsSync(sourcePath)) continue;
+    const targetPath = path.join(agentDir, file);
+    fs.copyFileSync(sourcePath, targetPath);
   }
 }
 
@@ -74,6 +72,6 @@ export function loadUserBootstrap(userDir: string): string {
 
 // Backward-compatible alias
 export function ensureBootstrapFiles(dir: string): void {
-  // Used by tools.ts ensureWorkspace — agentId unknown here, use "main" as default
-  ensureAgentBootstrapFiles(dir, "main");
+  // Used by tools.ts ensureWorkspace — agentId unknown here, use "user" as default
+  ensureAgentBootstrapFiles(dir, "user");
 }

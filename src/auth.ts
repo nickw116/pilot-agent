@@ -18,17 +18,16 @@ function getDb(): Database.Database {
 function ensureUserColumns(d: Database.Database) {
   const cols = (d.pragma("table_info(users)") as { name: string }[]).map(c => c.name);
   if (!cols.includes("allowed_agent")) {
-    d.exec("ALTER TABLE users ADD COLUMN allowed_agent TEXT DEFAULT 'main'");
+    d.exec("ALTER TABLE users ADD COLUMN allowed_agent TEXT DEFAULT 'user'");
   }
   if (!cols.includes("preferred_agent")) {
     d.exec("ALTER TABLE users ADD COLUMN preferred_agent TEXT DEFAULT NULL");
   }
 }
 
-// 新架构：admin 角色可见 main（智能助手）+ user（个人助手），普通用户只可见 user
-// 子 agent（dev）由 main agent 在后台通过 delegate 工具调用，用户不可见
+// 单 agent 架构：所有用户（含 admin）都使用 user agent
 export function getAllowedAgents(_allowedAgent: string | null, role?: string): string[] {
-  if (role === "admin") return ["main", "user"];
+  void role;
   return ["user"];
 }
 

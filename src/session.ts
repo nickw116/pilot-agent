@@ -10,6 +10,7 @@ function getDb(): Database.Database {
   db = new Database(DB_PATH, { readonly: false });
   db.pragma("journal_mode = WAL");
   ensureTables(db);
+  ensureAgentTypeColumn(db);
   return db;
 }
 
@@ -50,10 +51,19 @@ function ensureTables(d: Database.Database) {
   `);
 }
 
+function ensureAgentTypeColumn(d: Database.Database) {
+  const cols = (d.pragma("table_info(sessions)") as { name: string }[]).map((c) => c.name);
+  if (!cols.includes("agent_type")) {
+    d.exec("ALTER TABLE sessions ADD COLUMN agent_type TEXT DEFAULT 'securities'");
+    console.log("[session] added agent_type column to sessions table");
+  }
+}
+
 export interface Session {
   id: number;
   user_id: number;
   agent_id: string;
+  agent_type: string;
   session_key: string;
   title: string;
   created_at: number;
@@ -66,7 +76,7 @@ function makeSessionKey(userId: number, username: string, agentId: string): stri
   return `agent:${agentId}:h5-${username}-${ts}`;
 }
 
-export function createSession(userId: number, username: string, agentId = "main"): Session {
+export function createSession(userId: number, username: string, agentId = "user", agentType = "securities"): Session {
   const d = getDb();
   const sessionKey = makeSessionKey(userId, username, agentId);
   const now = Date.now() / 1000;
@@ -75,13 +85,14 @@ export function createSession(userId: number, username: string, agentId = "main"
     .run(userId, agentId);
 
   const result = d
-    .prepare("INSERT INTO sessions (user_id, agent_id, session_key, title, created_at, updated_at, active) VALUES (?, ?, ?, '', ?, ?, 1)")
-    .run(userId, agentId, sessionKey, now, now);
+    .prepare("INSERT INTO sessions (user_id, agent_id, agent_type, session_key, title, created_at, updated_at, active) VALUES (?, ?, ?, ?, '', ?, ?, 1)")
+    .run(userId, agentId, agentType, sessionKey, now, now);
 
   return {
     id: Number(result.lastInsertRowid),
     user_id: userId,
     agent_id: agentId,
+    agent_type: agentType,
     session_key: sessionKey,
     title: "",
     created_at: now,
@@ -95,13 +106,21 @@ export function getSession(sessionKey: string): Session | undefined {
   return d.prepare("SELECT * FROM sessions WHERE session_key = ?").get(sessionKey) as Session | undefined;
 }
 
-export function getOrCreateActiveSession(userId: number, username: string, agentId = "main"): Session {
+export function updateSessionAgentType(sessionKey: string, agentType: string): boolean {
+  const d = getDb();
+  const result = d
+    .prepare("UPDATE sessions SET agent_type = ?, updated_at = ? WHERE session_key = ?")
+    .run(agentType, Date.now() / 1000, sessionKey);
+  return result.changes > 0;
+}
+
+export function getOrCreateActiveSession(userId: number, username: string, agentId = "user", agentType = "securities"): Session {
   const d = getDb();
   const row = d
     .prepare("SELECT * FROM sessions WHERE user_id = ? AND agent_id = ? AND active = 1 ORDER BY updated_at DESC LIMIT 1")
     .get(userId, agentId) as Session | undefined;
   if (row) return row;
-  return createSession(userId, username, agentId);
+  return createSession(userId, username, agentId, agentType);
 }
 
 export function listSessions(userId: number, agentId?: string): Session[] {
@@ -167,6 +186,15 @@ export interface SessionStatusInfo {
   updatedAt: number;
 }
 
+// Injected liveness checker (avoids circular import with agent.ts).
+// Returns true when the given runId is currently active in-memory.
+type RunLivenessChecker = (sessionKey: string, runId: string | null) => boolean;
+let _runLivenessChecker: RunLivenessChecker | null = null;
+
+export function setRunLivenessChecker(fn: RunLivenessChecker): void {
+  _runLivenessChecker = fn;
+}
+
 export function setSessionStatus(sessionKey: string, status: SessionStatus, extra?: { runId?: string; error?: string }): void {
   const d = getDb();
   const now = Date.now();
@@ -183,7 +211,25 @@ export function getSessionStatus(sessionKey: string): SessionStatusInfo | null {
   const d = getDb();
   const row = d.prepare("SELECT status, run_id as runId, error, updated_at as updatedAt FROM session_status WHERE session_key = ?")
     .get(sessionKey) as SessionStatusInfo | undefined;
-  return row || null;
+  if (!row) return null;
+
+  // Self-heal stale "generating" state: if the persisted runId is no longer
+  // active in-memory, demote to "interrupted" so clients don't wait forever
+  // for a run.done event that will never arrive.
+  if (row.status === "generating" && _runLivenessChecker) {
+    const alive = _runLivenessChecker(sessionKey, row.runId);
+    if (!alive) {
+      console.warn(`[session] stale generating state detected for ${sessionKey} (runId=${row.runId}), demoting to interrupted`);
+      const now = Date.now();
+      d.prepare(
+        "UPDATE session_status SET status = 'interrupted', error = '检测到残留的进行中状态，已自动恢复', updated_at = ? WHERE session_key = ? AND status = 'generating'"
+      ).run(now, sessionKey);
+      row.status = "interrupted";
+      row.error = "检测到残留的进行中状态，已自动恢复";
+      row.updatedAt = now;
+    }
+  }
+  return row;
 }
 
 export function cleanInterruptedSessions(): number {

@@ -68,7 +68,7 @@ export function unregisterSubscriber(
 export function publish(sessionKey: string, event: SseEvent): void {
   if (!event.eventId) event.eventId = nextEventId(sessionKey);
   if (!event.sessionKey) event.sessionKey = sessionKey;
-  if (!event.source) event.source = "main";
+  if (!event.source) event.source = "user";
 
   const data = JSON.stringify(event);
 

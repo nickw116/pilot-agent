@@ -1,6 +1,7 @@
 node_modules/
 dist/
 data/
+data.pre-single-agent-backup/
 .env
 *.log
 __pycache__/
@@ -9,3 +10,5 @@ venv/
 *.egg-info/
 users.db
 .claude/
+.clawhub/
+user_addons/

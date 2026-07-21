@@ -115,7 +115,7 @@ const sortedAgents = computed(() => {
 })
 
 function agentIcon(id) {
-  const icons = { main: '🤖', dev: '💻', user: '👤' }
+  const icons = { user: '👤' }
   return icons[id] || '🤖'
 }
 
@@ -175,7 +175,7 @@ function handleWorkEvent(event) {
     return
   }
 
-  const agentId = payload.agentId || 'main'
+  const agentId = payload.agentId || 'user'
 
   if (!agentStates.value[agentId]) {
     agentStates.value[agentId] = {

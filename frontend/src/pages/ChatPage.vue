@@ -15,17 +15,7 @@
       <template #title>
         <div class="nav-title-wrap">
           <span v-if="props.monitorMode" class="nav-title nav-title--monitor">MONITOR</span>
-          <div class="nav-sub-row">
-            <button
-              v-if="props.currentModel"
-              class="nav-model-btn"
-              @click="openModelPicker"
-              :disabled="props.loading"
-            >
-              <span class="nav-model-text">{{ props.currentModel }}</span>
-              <van-icon name="arrow-down" class="nav-model-arrow" />
-            </button>
-          </div>
+          <span v-else class="nav-title nav-title--session" :title="props.sessionTitle || 'Pilot Agent'">{{ props.sessionTitle || 'Pilot Agent' }}</span>
         </div>
       </template>
       <template #right>
@@ -72,7 +62,19 @@
 
     <!-- 空会话引导区 -->
     <div v-else-if="!props.monitorMode && props.messages.length === 0" class="empty-state">
-      <div class="empty-greeting">有什么我能帮你的吗？</div>
+      <div class="empty-agent-types">
+        <button
+          v-for="t in props.agentTypes"
+          :key="t.id"
+          :class="['agent-type-pill', { 'agent-type-pill--active': t.id === props.currentAgentType }]"
+          @click="switchAgentType(t.id)"
+        >
+          <span class="agent-type-pill__icon">{{ t.icon }}</span>
+          <span class="agent-type-pill__name">{{ t.name }}</span>
+        </button>
+      </div>
+      <div class="empty-greeting">{{ currentAgentTypeMeta?.icon }} {{ currentAgentTypeMeta?.name || 'Pilot Agent' }}</div>
+      <div v-if="currentAgentTypeMeta?.description" class="empty-subtitle">{{ currentAgentTypeMeta.description }}</div>
       <div class="empty-cards">
         <button
           v-for="(card, idx) in suggestionCards"
@@ -101,23 +103,6 @@
 
     <!-- Monitor mode: interactive banner + input -->
     <template v-if="props.monitorMode">
-      <div class="monitor-banner monitor-banner--interactive">
-        <span class="monitor-banner__info">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-            <circle cx="9" cy="7" r="4"/>
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-          </svg>
-          代入会话: {{ props.monitorUserInfo }}
-        </span>
-        <button class="monitor-exit-btn" @click="emit('exit-monitor')">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18"/>
-            <line x1="6" y1="6" x2="18" y2="18"/>
-          </svg>
-        </button>
-      </div>
       <MessageInput
         v-model="monitorInputText"
         :loading="monitorLoading"
@@ -128,7 +113,27 @@
         @abort="monitorAbort"
         @upload="() => {}"
         @remove-attachment="() => {}"
-      />
+      >
+        <template #banner>
+          <div class="monitor-banner monitor-banner--floating">
+            <span class="monitor-banner__info">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                <circle cx="9" cy="7" r="4"/>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+              </svg>
+              代入会话: {{ props.monitorUserInfo }}
+            </span>
+            <button class="monitor-exit-btn" @click="emit('exit-monitor')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          </div>
+        </template>
+      </MessageInput>
     </template>
 
     <!-- Normal mode: message input -->
@@ -143,22 +148,57 @@
       @abort="abort"
       @upload="(file) => $emit('upload', file)"
       @remove-attachment="(idx) => $emit('remove-attachment', idx)"
-    />
-
-    <!-- 模型选择器 -->
-    <van-action-sheet
-      v-model:show="modelPickerVisible"
-      :actions="modelActions"
-      cancel-text="取消"
-      description="选择模型"
-      close-on-click-action
-      @select="onModelSelect"
-    />
+    >
+      <template #action-extra>
+        <van-popover
+          v-if="props.agentTypes.length > 1"
+          v-model:show="agentTypePickerVisible"
+          :actions="agentTypeActions"
+          placement="top"
+          :close-on-click-action="true"
+          :close-on-click-outside="true"
+          class="model-picker-popover"
+          @select="onAgentTypeSelect"
+        >
+          <template #reference>
+            <button
+              class="input-model-btn input-agent-type-btn"
+              :disabled="props.loading"
+              type="button"
+            >
+              <span class="input-model-text">{{ currentAgentTypeMeta?.icon }} {{ currentAgentTypeMeta?.name }}</span>
+              <van-icon name="arrow-down" class="input-model-arrow" />
+            </button>
+          </template>
+        </van-popover>
+        <van-popover
+          v-if="props.currentModel"
+          v-model:show="modelPickerVisible"
+          :actions="modelActions"
+          placement="top"
+          :close-on-click-action="true"
+          :close-on-click-outside="true"
+          class="model-picker-popover"
+          @select="onModelSelect"
+        >
+          <template #reference>
+            <button
+              class="input-model-btn"
+              :disabled="props.loading"
+              type="button"
+            >
+              <span class="input-model-text">{{ props.currentModel }}</span>
+              <van-icon name="arrow-down" class="input-model-arrow" />
+            </button>
+          </template>
+        </van-popover>
+      </template>
+    </MessageInput>
   </div>
 </template>
 
 <script setup>
-import { ref, watch, nextTick, onMounted, computed } from 'vue'
+import { ref, watch, nextTick, onMounted, onBeforeUnmount, computed } from 'vue'
 import { API_BASE, TOKEN_KEY } from '../constants/index.js'
 import MessageInput from '../components/MessageInput.vue'
 import MessageList from '../components/MessageList.vue'
@@ -167,6 +207,7 @@ const props = defineProps({
   messages: { type: Array, default: () => [] },
   inputText: { type: String, default: '' },
   loading: { type: Boolean, default: false },
+  sessionTitle: { type: String, default: '' },
   historyLoading: { type: Boolean, default: false },
   uploading: { type: Boolean, default: false },
   uploadProgress: { type: Number, default: 0 },
@@ -182,19 +223,49 @@ const props = defineProps({
   acpBridge: { type: Object, default: () => null },
   models: { type: Array, default: () => [] },
   sessionKey: { type: String, default: '' },
-  currentAgentId: { type: String, default: 'main' },
+  currentAgentId: { type: String, default: 'user' },
   monitorMode: { type: Boolean, default: false },
   monitorMessages: { type: Array, default: () => [] },
   monitorHistoryLoading: { type: Boolean, default: false },
   monitorUserInfo: { type: String, default: '' },
   monitorLoading: { type: Boolean, default: false },
   canAccessMonitor: { type: Boolean, default: false },
+  agentTypes: { type: Array, default: () => [] },
+  currentAgentType: { type: String, default: 'securities' },
 })
 
-const emit = defineEmits(['update:inputText', 'send', 'abort', 'upload', 'remove-attachment', 'open-settings', 'hot-refresh', 'switch-model', 'load-more', 'open-sessions', 'open-monitor', 'open-dashboard', 'monitor-send', 'monitor-abort', 'exit-monitor'])
+const emit = defineEmits(['update:inputText', 'send', 'abort', 'upload', 'remove-attachment', 'open-settings', 'hot-refresh', 'switch-model', 'switch-agent-type', 'load-more', 'open-sessions', 'open-monitor', 'open-dashboard', 'monitor-send', 'monitor-abort', 'exit-monitor'])
 
 // ── 模型选择器 ──
 const modelPickerVisible = ref(false)
+
+// ── Agent 类型选择器 ──
+const agentTypePickerVisible = ref(false)
+
+const currentAgentTypeMeta = computed(() => {
+  return props.agentTypes.find((t) => t.id === props.currentAgentType) || null
+})
+
+const agentTypeActions = computed(() => {
+  return props.agentTypes.map((t) => ({
+    text: `${t.icon} ${t.name}`,
+    value: t.id,
+    color: t.id === props.currentAgentType ? 'var(--color-primary)' : undefined,
+  }))
+})
+
+function onAgentTypeSelect(action) {
+  const value = action.value || action.id
+  if (value && value !== props.currentAgentType) {
+    switchAgentType(value)
+  }
+}
+
+function switchAgentType(typeId) {
+  if (typeId !== props.currentAgentType) {
+    emit('switch-agent-type', typeId)
+  }
+}
 
 const modelActions = computed(() => {
   // 兜底：如果后端 models 为空但 currentModel 有值，至少把当前模型放进去
@@ -206,7 +277,7 @@ const modelActions = computed(() => {
     const name = isObj ? (m.name || m.id || m.model || String(m)) : String(m)
     const value = isObj ? (m.id || m.model || m.name || String(m)) : String(m)
     return {
-      name,
+      text: name,
       value,
       color: value === props.currentModel ? 'var(--color-primary)' : undefined,
     }
@@ -219,7 +290,7 @@ function openModelPicker() {
 }
 
 function onModelSelect(action) {
-  const value = action.value || action.name
+  const value = action.value || action.text || action.name
   if (value && value !== props.currentModel) {
     emit('switch-model', value)
   }
@@ -227,8 +298,21 @@ function onModelSelect(action) {
 
 const messageListRef = ref(null)
 
+// ── 模型弹窗桌面端关闭 ──
+// vant popover 的 close-on-click-outside 只监听 touchstart（移动端），
+// PC 浏览器鼠标点击只产生 click，需自行监听才能在桌面端关闭。
+function onDocClickForModelPicker(e) {
+  if (!modelPickerVisible.value && !agentTypePickerVisible.value) return
+  if (e.target.closest && e.target.closest('.input-model-btn')) return
+  modelPickerVisible.value = false
+  agentTypePickerVisible.value = false
+}
+
 onMounted(() => {
-  // placeholder for any mount-time setup
+  document.addEventListener('click', onDocClickForModelPicker, true)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onDocClickForModelPicker, true)
 })
 
 const inputText = ref(props.inputText)
@@ -257,14 +341,16 @@ function reloadPage() {
   setTimeout(() => { refreshing.value = false }, 1500)
 }
 
-const suggestionCards = [
-  { icon: '💡', text: '帮我写一段Python爬虫代码' },
-  { icon: '📝', text: '帮我写一封工作周报' },
-  { icon: '🔍', text: '解释一下什么是RAG技术' },
-  { icon: '🛠️', text: '如何优化React应用性能' },
-  { icon: '📊', text: '帮我分析一组销售数据' },
-  { icon: '🌐', text: '把这段话翻译成英文' },
-]
+const suggestionCards = computed(() => {
+  const meta = currentAgentTypeMeta.value
+  if (meta?.suggestions?.length > 0) return meta.suggestions
+  return [
+    { icon: '💡', text: '帮我写一段Python爬虫代码' },
+    { icon: '📝', text: '帮我写一封工作周报' },
+    { icon: '🔍', text: '解释一下什么是RAG技术' },
+    { icon: '📊', text: '帮我分析一组销售数据' },
+  ]
+})
 
 function fillSuggestion(text) {
   inputText.value = text
@@ -309,6 +395,12 @@ function monitorAbort() {
   font-weight: 600;
   font-size: 16px;
   color: var(--color-text);
+}
+.nav-title--session {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .nav-title-wrap {
   display: flex;
@@ -576,6 +668,56 @@ function monitorAbort() {
   justify-content: center;
   padding: 0 24px;
 }
+.empty-agent-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 20px;
+  max-width: 500px;
+}
+.agent-type-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  border-radius: 999px;
+  background: var(--color-bg-glass);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+  transition: all var(--transition-normal);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.agent-type-pill:active {
+  transform: scale(0.96);
+}
+@media (hover: hover) {
+  .agent-type-pill:hover {
+    border-color: var(--color-border-glow);
+    background: var(--color-bg-glass-hover);
+    color: var(--color-text);
+  }
+}
+.agent-type-pill--active {
+  background: rgba(var(--color-primary-rgb), 0.1);
+  border-color: rgba(var(--color-primary-rgb), 0.3);
+  color: var(--color-primary);
+}
+.agent-type-pill__icon {
+  font-size: 16px;
+}
+.empty-subtitle {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  text-align: center;
+  margin-bottom: 24px;
+  margin-top: -16px;
+}
 .empty-greeting {
   font-size: 22px;
   font-weight: 600;
@@ -646,11 +788,17 @@ function monitorAbort() {
   align-items: center;
   justify-content: center;
   padding: 8px 12px;
-  border-top: 1px solid rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.15);
   gap: 10px;
 }
-.monitor-banner--interactive {
-  background: rgba(99, 102, 241, 0.06);
+.monitor-banner--floating {
+  max-width: 720px;
+  margin: 0 auto 6px;
+  border-radius: 14px;
+  background: var(--color-bg-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  pointer-events: auto;
 }
 .monitor-banner__info {
   display: flex;
@@ -682,5 +830,90 @@ function monitorAbort() {
 .monitor-exit-btn:active {
   background: rgba(99, 102, 241, 0.2);
   transform: scale(0.9);
+}
+
+/* ── Input Model Bar (model selector in action-row, normal mode) ── */
+.input-model-bar {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.input-model-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: transparent;
+  border: none;
+  font-size: 12px;
+  color: var(--color-primary);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  outline: none;
+  max-width: 200px;
+}
+.input-model-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.input-model-btn:active:not(:disabled) {
+  background: rgba(99, 102, 241, 0.08);
+  transform: scale(0.96);
+}
+.input-agent-type-btn {
+  color: var(--color-text);
+  font-weight: 600;
+}
+.input-agent-type-btn .input-model-arrow {
+  color: var(--color-text-secondary);
+}
+.input-model-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.input-model-arrow {
+  font-size: 11px;
+  color: var(--color-primary);
+  flex-shrink: 0;
+  transition: transform var(--transition-normal);
+}
+.input-model-btn:active:not(:disabled) .input-model-arrow {
+  transform: rotate(180deg);
+}
+
+/* ── Model Popover: widen so model names stay on one line ── */
+.van-popover.model-picker-popover {
+  max-width: none;
+  width: max-content;
+  min-width: 180px;
+}
+.van-popover.model-picker-popover .van-popover__content {
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+}
+.van-popover.model-picker-popover .van-popover__action {
+  width: 100%;
+  padding: 0 20px;
+  background: #fff;
+  color: #111;
+}
+.van-popover.model-picker-popover .van-popover__action:active {
+  background: #f2f3f5;
+}
+.van-popover.model-picker-popover .van-popover__action-text {
+  white-space: nowrap;
+  word-break: keep-all;
+  color: #111;
+}
+.van-popover.model-picker-popover .van-popover__arrow {
+  color: #fff;
 }
 </style>

@@ -114,10 +114,25 @@ export function useEventStream(tokenRef, sessionKeyRef, options = {}) {
     return event
   }
 
+  // ── visibilitychange: 回前台立即重连，避免切后台期间 SSE 被杀 ──
+  const VISIBILITY_STALE_MS = 5000
+
+  function _onVisibilityChange() {
+    if (!active) return
+    if (document.visibilityState !== 'visible') return
+    const stale = Date.now() - lastDataAt.value > VISIBILITY_STALE_MS
+    if (!connected.value || stale) {
+      console.debug('[EventStream] visible again, reconnecting to resume events')
+      reconnectAttempt = 0
+      _doConnect()
+    }
+  }
+
   async function connect() {
     if (active) return
     active = true
     reconnectAttempt = 0
+    document.addEventListener('visibilitychange', _onVisibilityChange)
     _doConnect()
   }
 
@@ -244,6 +259,9 @@ export function useEventStream(tokenRef, sessionKeyRef, options = {}) {
     } catch (err) {
       clearTimeout(fetchTimeoutId)
       if (err.name === 'AbortError') {
+        // disconnect() sets active=false before aborting → don't reconnect.
+        // stall/fetch timeouts abort while active=true → must reconnect.
+        if (active) _scheduleReconnect()
         return
       }
       console.error('[EventStream] error:', err.message || err.name || err)
@@ -269,6 +287,7 @@ export function useEventStream(tokenRef, sessionKeyRef, options = {}) {
 
   function disconnect() {
     active = false
+    document.removeEventListener('visibilitychange', _onVisibilityChange)
     _clearStallTimer()
     _clearAckIdleTimer()
     ackPendingCount = 0

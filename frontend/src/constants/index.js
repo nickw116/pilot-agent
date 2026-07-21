@@ -25,10 +25,12 @@ export const API_SESSION_NEW = '/session/new'
 export const API_CHANGE_PASSWORD = '/change-password'
 export const API_MODELS = '/models'
 export const API_MODEL_SWITCH = '/model/switch'
+export const API_AGENT_TYPE_SWITCH = '/session/agent-type'
 export const API_AGENTS = '/agents'
+export const API_AGENT_TYPES = '/agent-types'
 export const API_STT = '/stt'
 export const API_ADMIN_SESSIONS = '/admin/sessions'
 
 // Session
-export const SESSION_PREFIX = 'agent:main:h5'
+export const SESSION_PREFIX = 'agent:user:h5'
 export const SESSION_KEY = 'pilot-agent-session-key'

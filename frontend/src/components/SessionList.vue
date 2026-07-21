@@ -15,10 +15,35 @@
         </van-button>
       </div>
 
+      <!-- Search -->
+      <div class="session-search">
+        <svg class="session-search__icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"/>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input
+          v-model="searchQuery"
+          type="text"
+          class="session-search__input"
+          placeholder="搜索会话..."
+        >
+        <button
+          v-if="searchQuery"
+          class="session-search__clear"
+          @click="searchQuery = ''"
+          aria-label="清除"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
       <!-- Session List -->
       <div class="session-list">
         <div
-          v-for="s in sessions"
+          v-for="s in filteredSessions"
           :key="s.sessionKey"
           :class="['session-item', { active: s.active }]"
           @click="handleSwitch(s)"
@@ -29,9 +54,8 @@
             </svg>
           </div>
           <div class="session-info">
-            <div class="session-name">{{ getAgentName(s) }}</div>
+            <div class="session-name">{{ s.title || getSessionLabel(s) }}</div>
             <div class="session-time">{{ formatTime(s) }}</div>
-            <div class="session-key" @click.stop="copyKey(s.sessionKey)" :title="s.sessionKey">{{ s.sessionKey }}</div>
           </div>
           <div v-if="s.active" class="session-active-badge">当前</div>
           <button v-if="!s.active" @click.stop="handleDelete(s)" class="session-delete-btn">删除</button>
@@ -39,6 +63,9 @@
 
         <div v-if="sessions.length === 0 && !loading" class="session-empty">
           暂无会话
+        </div>
+        <div v-else-if="filteredSessions.length === 0 && !loading" class="session-empty">
+          未找到匹配的会话
         </div>
         <div v-if="loading" class="session-empty">加载中...</div>
       </div>
@@ -55,8 +82,9 @@ const props = defineProps({
   show: { type: Boolean, default: false },
   token: { type: String, default: '' },
   currentSessionKey: { type: String, default: '' },
-  currentAgentId: { type: String, default: 'main' },
+  currentAgentId: { type: String, default: 'user' },
   agents: { type: Array, default: () => [] },
+  agentTypes: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits(['update:show', 'switch', 'new', 'delete'])
@@ -68,6 +96,27 @@ const visible = computed({
 
 const sessions = ref([])
 const loading = ref(false)
+const searchQuery = ref('')
+
+const filteredSessions = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return sessions.value
+  return sessions.value.filter((s) => {
+    const title = (s.title || '').toLowerCase()
+    const label = getSessionLabel(s).toLowerCase()
+    const agentName = getAgentName(s).toLowerCase()
+    return (
+      title.includes(q) ||
+      label.includes(q) ||
+      agentName.includes(q)
+    )
+  })
+})
+
+// Clear search when drawer closes
+watch(visible, (v) => {
+  if (!v) searchQuery.value = ''
+})
 
 // Refresh session list when drawer opens or agent changes
 watch([() => props.show, () => props.currentAgentId], ([v]) => {
@@ -141,8 +190,11 @@ function getAgentName(s) {
   return props.agents.find(a => a.id === agentId)?.name || agentId || '会话'
 }
 
-function copyKey(key) {
-  navigator.clipboard.writeText(key).catch(() => {})
+function getSessionLabel(s) {
+  const atype = s.agentType
+  const typeMeta = props.agentTypes.find((t) => t.id === atype)
+  if (typeMeta) return `${typeMeta.icon} ${typeMeta.name}`
+  return getAgentName(s)
 }
 
 function formatTime(s) {
@@ -207,6 +259,60 @@ function formatTime(s) {
   line-height: 1;
 }
 .new-session-btn:active { transform: scale(0.95); }
+
+.session-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 12px 4px;
+  padding: 8px 12px;
+  background: var(--color-bg-glass);
+  border: 1.5px solid var(--color-border);
+  border-radius: 10px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.session-search:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+.session-search__icon {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+.session-search__input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 14px;
+  color: var(--color-text);
+  line-height: 1.4;
+}
+.session-search__input::placeholder {
+  color: var(--color-text-muted);
+}
+.session-search__clear {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  color: var(--color-bg);
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+}
+.session-search__clear:hover {
+  background: var(--color-text-secondary);
+}
+.session-search__clear:active {
+  transform: scale(0.85);
+}
 
 .session-list {
   flex: 1;
@@ -294,20 +400,6 @@ function formatTime(s) {
   color: var(--color-text-muted);
   line-height: 1.3;
   margin-top: 2px;
-}
-.session-key {
-  font-size: 10px;
-  color: var(--color-text-muted);
-  opacity: 0.6;
-  font-family: 'SF Mono', 'Menlo', monospace;
-  word-break: break-all;
-  line-height: 1.4;
-  margin-top: 2px;
-  cursor: pointer;
-}
-.session-key:hover {
-  opacity: 1;
-  color: var(--color-primary);
 }
 .session-item.active .session-name {
   color: var(--color-primary);

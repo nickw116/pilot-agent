@@ -21,7 +21,7 @@ export function useServiceStatus() {
     try {
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), 10000)
-      const resp = await fetch(`${API_BASE}/health`, { signal: controller.signal })
+      const resp = await fetch(`${API_BASE}/health`, { cache: 'no-store', signal: controller.signal })
       clearTimeout(timeout)
 
       if (resp.ok) {

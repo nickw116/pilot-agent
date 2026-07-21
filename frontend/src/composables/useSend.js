@@ -132,8 +132,16 @@ export function useSend(ctx, streamingApi) {
       const entries = data.entries || data.messages || []
       console.debug('[useChat] history entries:', entries.length)
 
+      if (typeof data.title === 'string') {
+        ctx.sessionTitle.value = data.title
+      }
+
       if (data.status) {
         handleSessionStatus(data.status)
+      }
+
+      if (data.agentType && typeof ctx.onAgentTypeUpdate === 'function') {
+        ctx.onAgentTypeUpdate(data.agentType)
       }
 
       const historyMessages = entries
@@ -184,12 +192,14 @@ export function useSend(ctx, streamingApi) {
       )
 
       const finalMessages = [...historyMessages]
+      // 先放本地未持久化的用户消息，再放流式回复气泡，避免插入/steer 的用户消息
+      // 被追加到回复气泡之后，破坏对话时序。
+      for (const um of localUserMessages) {
+        finalMessages.push(um)
+      }
       for (const pm of preservedStreaming) {
         if (pm.runId && historyRunIds.has(pm.runId)) continue
         finalMessages.push(pm)
-      }
-      for (const um of localUserMessages) {
-        finalMessages.push(um)
       }
 
       messages.value = finalMessages
@@ -410,7 +420,11 @@ export function useSend(ctx, streamingApi) {
         try {
           const r = await fetch(`${API_BASE}${API_SESSION_NEW}`, {
             method: 'POST',
-            headers: { Authorization: `Bearer ${ctx.token.value}` },
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${ctx.token.value}`,
+            },
+            body: JSON.stringify({ agent_type: typeof ctx.getAgentType === 'function' ? ctx.getAgentType() : undefined }),
           })
           if (r.ok) {
             const data = await r.json()
@@ -460,7 +474,23 @@ export function useSend(ctx, streamingApi) {
 
       inputText.value = ''
       attachments.value = []
-      messages.value.push({ id: Date.now(), role: 'user', content: fullMessage })
+
+      // 判断是否会走 steer（中间插入）路径：若 AI 正在回复，需要把用户消息
+      // 插到"当前流式回复气泡"的前面，而不是追加到列表末尾，否则插入的消息
+      // 会出现在回复之后，破坏对话顺序。
+      const willSteer = ctx.loading.value && ctx.state.currentRunId && ctx.getStreamMode() === 'events'
+      const userMsg = { id: Date.now(), role: 'user', content: fullMessage, pending: true }
+      if (willSteer && ctx.state.aiMsg) {
+        const aiIdx = messages.value.indexOf(ctx.state.aiMsg)
+        if (aiIdx >= 0) {
+          messages.value.splice(aiIdx, 0, userMsg)
+        } else {
+          messages.value.push(userMsg)
+        }
+      } else {
+        messages.value.push(userMsg)
+      }
+      ctx.scrollToBottom()
 
       // -- Steer mode: append message to active run --
       if (ctx.loading.value && ctx.state.currentRunId && ctx.getStreamMode() === 'events') {
@@ -480,14 +510,17 @@ export function useSend(ctx, streamingApi) {
             const data = await resp.json()
             if (data.mode === 'steered') {
               console.debug('[useChat] message steered to active run')
+              userMsg.pending = false
               ctx.scrollToBottom()
               return
             }
           }
-          // Steer failed, fall through to normal send
+          // Steer failed, fall through to normal send (new run)
           console.warn('[useChat] steer failed, falling back to normal send')
+          showNotify({ type: 'warning', message: '未插入当前对话，已作为新消息发送' })
         } catch (err) {
           console.warn('[useChat] steer request failed:', err)
+          showNotify({ type: 'warning', message: '插入失败，已作为新消息发送' })
         }
       }
 
@@ -510,6 +543,7 @@ export function useSend(ctx, streamingApi) {
             body: JSON.stringify({
               message: fullMessage,
               session_key: ctx.sessionKey.value,
+              agent_type: typeof ctx.getAgentType === 'function' ? ctx.getAgentType() : undefined,
               images: sendImages.length > 0 ? sendImages : undefined,
               videos: sendVideos.length > 0 ? sendVideos : undefined,
               audios: sendAudios.length > 0 ? sendAudios : undefined,
@@ -520,6 +554,7 @@ export function useSend(ctx, streamingApi) {
             console.error('[useChat] v2 HTTP error:', resp.status, errText)
             aiMsg.isStreaming = false
             aiMsg.content = `请求失败 (${resp.status})`
+            userMsg.pending = false
             ctx.loading.value = false
             streamingApi.clearLoadingGuard()
             return
@@ -527,6 +562,7 @@ export function useSend(ctx, streamingApi) {
           const data = await resp.json()
           ctx.state.currentRunId = data.runId || null
           aiMsg.runId = ctx.state.currentRunId
+          userMsg.pending = false
           console.debug('[useChat] v2 sent, runId:', data.runId)
 
           const v2RunId = ctx.state.currentRunId
@@ -555,6 +591,7 @@ export function useSend(ctx, streamingApi) {
           console.error('[useChat] v2 send failed:', err)
           aiMsg.isStreaming = false
           aiMsg.content = '发送失败，请重试'
+          userMsg.pending = false
           showNotify({ type: 'warning', message: '发送失败，请重试' })
           ctx.loading.value = false
           streamingApi.clearLoadingGuard()
@@ -583,6 +620,7 @@ export function useSend(ctx, streamingApi) {
           body: JSON.stringify({
             message: fullMessage,
             session_key: ctx.sessionKey.value,
+            agent_type: typeof ctx.getAgentType === 'function' ? ctx.getAgentType() : undefined,
           }),
           signal: ctx.state.abortController.signal,
         })
@@ -618,6 +656,7 @@ export function useSend(ctx, streamingApi) {
           showNotify({ type: 'warning', message: '连接中断，请重试' })
         }
       } finally {
+        userMsg.pending = false
         if (ctx.state.suspendedRequestId === requestId) {
           ctx.state.suspendedRequestId = null
           return

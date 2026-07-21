@@ -2,9 +2,9 @@
   <div class="message-list" ref="listRef">
     <template v-for="msg in visibleMessages" :key="msg.id">
       <div
-        :class="['message-item', msg.role]"
+        :class="['message-item', msg.role, { pending: msg.pending }]"
       >
-        <div class="bubble">
+        <div class="bubble" :class="{ 'bubble--thinking': shouldShowThinking(msg) }">
           <div v-if="msg.thinking" class="thinking-block">
             <div class="thinking-header" @click="msg._thinkingExpanded = !msg._thinkingExpanded">
               <span class="thinking-icon">💭</span>
@@ -96,16 +96,98 @@
             :is-running="isAcpRunning(msg)"
             :acp-status="msg.acpStatus || ''"
           />
+          <div v-if="msg.pending" class="pending-indicator">
+            <span class="pending-spinner"></span>
+            <span class="pending-text">发送中…</span>
+          </div>
+          <div v-if="msg.content && !msg.pending" class="bubble-actions">
+            <button
+              class="bubble-expand-btn"
+              type="button"
+              @click.stop="openFullscreen(msg)"
+              title="全屏查看"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+            </button>
+            <button
+              class="bubble-copy-btn"
+              type="button"
+              @click.stop="handleBubbleCopy($event, msg)"
+              title="复制"
+            >
+              <svg class="copy-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </button>
+          </div>
         </div>
       </div>
     </template>
   </div>
+
+  <Teleport to="body">
+    <Transition name="msg-fs">
+      <div
+        v-if="fullscreenMsg"
+        class="msg-fs"
+        @click.self="closeFullscreen"
+      >
+        <div class="msg-fs-card">
+          <div class="msg-fs-header">
+            <span class="msg-fs-tag">{{ fullscreenMsg.role === 'assistant' ? '🤖 AI 助手' : '🧑 我' }}</span>
+            <div class="msg-fs-actions">
+              <button
+                type="button"
+                class="msg-fs-btn"
+                :class="{ copied: fullscreenCopied }"
+                @click="copyFullscreen"
+                title="复制全部"
+              >
+                <svg class="copy-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                <svg class="check-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                <span class="msg-fs-btn-label">{{ fullscreenCopied ? '已复制' : '复制' }}</span>
+              </button>
+              <button
+                type="button"
+                class="msg-fs-btn msg-fs-btn--close"
+                @click="closeFullscreen"
+                title="关闭 (Esc)"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+          </div>
+          <div
+            class="msg-fs-body text"
+            :class="{ markdown: fullscreenMsg.role === 'assistant' }"
+            @click="onFullscreenClick"
+          >
+            <span v-if="fullscreenHasText" v-html="fullscreenHtml"></span>
+            <div
+              v-if="fullscreenMsg.media && fullscreenMsg.media.images && fullscreenMsg.media.images.length > 0"
+              class="msg-fs-images"
+            >
+              <img
+                v-for="(imgUrl, imgIdx) in fullscreenMsg.media.images"
+                :key="imgIdx"
+                :src="imgUrl"
+                class="msg-fs-img"
+                @click="previewImage(imgUrl, fullscreenMsg.media.images)"
+                loading="lazy"
+                @error="handleImgError"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { formatText, renderMarkdown, previewImage } from '../utils/format.js'
 import { downloadFile } from '../utils/download.js'
+import { showNotify } from 'vant'
 import AcpLogPanel from './AcpLogPanel.vue'
 
 const props = defineProps({
@@ -115,7 +197,7 @@ const props = defineProps({
   fileIcon: { type: Function, default: () => '📄' },
   acpLogs: { type: Array, default: () => [] },
   acpStatus: { type: String, default: '' },
-  currentAgentId: { type: String, default: 'main' },
+  currentAgentId: { type: String, default: 'user' },
 })
 
 const emit = defineEmits(['load-more'])
@@ -169,6 +251,33 @@ function downloadMediaUrl(url) {
   downloadFile({ url, filename })
 }
 
+function handleBubbleCopy(e, msg) {
+  const text = getMsgRenderText(msg) || msg.content || ''
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = e.currentTarget
+    btn.classList.add('copied')
+    showNotify({ type: 'success', message: '已复制到剪贴板', duration: 1500 })
+    setTimeout(() => btn.classList.remove('copied'), 2000)
+  }).catch(() => {})
+}
+
+function handleCodeCopy(e) {
+  const btn = e.target.closest('.code-copy')
+  if (!btn) return
+  const block = btn.closest('.code-block')
+  if (!block) return
+  const code = block.querySelector('code')
+  if (!code) return
+  navigator.clipboard.writeText(code.textContent).then(() => {
+    btn.textContent = '已复制'
+    btn.classList.add('copied')
+    setTimeout(() => {
+      btn.textContent = '复制'
+      btn.classList.remove('copied')
+    }, 2000)
+  }).catch(() => {})
+}
+
 function scrollToBottom() {
   const el = listRef.value
   if (el) {
@@ -201,11 +310,77 @@ watch(
 
 onMounted(() => {
   listRef.value?.addEventListener('scroll', handleScroll, { passive: true })
+  listRef.value?.addEventListener('click', handleCodeCopy)
   scrollToBottom()
+})
+
+// ── Fullscreen message view ──
+const fullscreenMsg = ref(null)
+const fullscreenCopied = ref(false)
+
+const fullscreenHtml = computed(() => {
+  const msg = fullscreenMsg.value
+  if (!msg) return ''
+  const text = getMsgRenderText(msg)
+  if (!text) return ''
+  return msg.role === 'assistant' ? (msg._renderedCache || renderMarkdown(text)) : formatText(text)
+})
+
+const fullscreenHasText = computed(() => {
+  const msg = fullscreenMsg.value
+  if (!msg) return false
+  return getMsgRenderText(msg).trim().length > 0
+})
+
+function openFullscreen(msg) {
+  fullscreenMsg.value = msg
+  fullscreenCopied.value = false
+}
+
+function closeFullscreen() {
+  fullscreenMsg.value = null
+}
+
+function copyFullscreen() {
+  const msg = fullscreenMsg.value
+  if (!msg) return
+  const text = getMsgRenderText(msg) || msg.content || ''
+  navigator.clipboard.writeText(text).then(() => {
+    fullscreenCopied.value = true
+    showNotify({ type: 'success', message: '已复制到剪贴板', duration: 1500 })
+    setTimeout(() => { fullscreenCopied.value = false }, 2000)
+  }).catch(() => {})
+}
+
+function onFullscreenClick(e) {
+  handleCodeCopy(e)
+  const img = e.target.closest('img')
+  if (img && img.src) {
+    const imgs = fullscreenMsg.value?.media?.images
+    previewImage(img.src, imgs && imgs.length ? imgs : [img.src])
+  }
+}
+
+function handleEsc(e) {
+  if (e.key === 'Escape' && fullscreenMsg.value) closeFullscreen()
+}
+
+watch(fullscreenMsg, (val) => {
+  if (typeof document === 'undefined') return
+  if (val) {
+    document.addEventListener('keydown', handleEsc)
+    document.body.style.overflow = 'hidden'
+  } else {
+    document.removeEventListener('keydown', handleEsc)
+    document.body.style.overflow = ''
+  }
 })
 
 onBeforeUnmount(() => {
   listRef.value?.removeEventListener('scroll', handleScroll)
+  listRef.value?.removeEventListener('click', handleCodeCopy)
+  document.removeEventListener('keydown', handleEsc)
+  if (document.body) document.body.style.overflow = ''
 })
 
 defineExpose({ scrollToBottom })
@@ -216,7 +391,7 @@ defineExpose({ scrollToBottom })
 .message-list {
   flex: 1;
   overflow-y: auto;
-  padding: 12px 14px;
+  padding: 12px 14px 104px;
   scroll-behavior: smooth;
   -webkit-overflow-scrolling: touch;
 }
@@ -234,6 +409,7 @@ defineExpose({ scrollToBottom })
 }
 .message-item.assistant {
   margin-right: auto;
+  max-width: 100%;
 }
 
 /* ── Bubble ── */
@@ -262,20 +438,127 @@ defineExpose({ scrollToBottom })
   }
 }
 .message-item.assistant .bubble {
-  background: var(--color-bg-glass);
-  backdrop-filter: blur(8px);
+  background: var(--color-bg-secondary);
   color: var(--color-text);
   border-radius: 18px;
   border: 1px solid var(--color-border);
   box-shadow: var(--shadow-sm);
-  max-width: 85%;
+  width: 100%;
+  max-width: 100%;
+  flex: 1 1 auto;
+  box-sizing: border-box;
 }
-@media (min-width: 1200px) {
-  .message-item.assistant .bubble {
-    max-width: 800px;
-  }
+.message-item.assistant .bubble--thinking {
+  width: auto;
+  flex: 0 0 auto;
 }
 .text { min-height: 8px; }
+
+/* ── Pending (sending) state ── */
+.message-item.pending .bubble {
+  opacity: 0.65;
+}
+.message-item.user.pending .bubble {
+  background: var(--color-bg-glass, #eef0f3);
+  border: 1px dashed rgba(99, 102, 241, 0.35);
+  box-shadow: none;
+}
+.pending-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.pending-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(99, 102, 241, 0.2);
+  border-top-color: var(--color-primary, #6366f1);
+  border-radius: 50%;
+  animation: pending-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes pending-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Bubble Actions (复制 / 全屏，独立成行避免与短文本重叠) ── */
+.bubble-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 6px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.bubble:hover .bubble-actions {
+  opacity: 1;
+}
+@media (hover: none) {
+  .bubble-actions {
+    opacity: 0.4;
+  }
+}
+
+/* ── Bubble Expand (fullscreen) Button ── */
+.bubble-expand-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: none;
+  background: rgba(99, 102, 241, 0.06);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.bubble-expand-btn:hover {
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--color-primary);
+}
+.bubble-expand-btn:active {
+  transform: scale(0.9);
+}
+
+.bubble-copy-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: none;
+  background: rgba(99, 102, 241, 0.06);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.bubble-copy-btn:hover {
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--color-primary);
+}
+.bubble-copy-btn:active {
+  transform: scale(0.9);
+}
+.bubble-copy-btn .check-icon {
+  display: none;
+}
+.bubble-copy-btn.copied .copy-icon {
+  display: none;
+}
+.bubble-copy-btn.copied .check-icon {
+  display: block;
+  color: var(--color-success);
+}
+.bubble-copy-btn.copied {
+  opacity: 1;
+}
 
 /* ── Typing Cursor ── */
 .typing-cursor {
@@ -638,5 +921,149 @@ defineExpose({ scrollToBottom })
 }
 .file-card:hover .file-card-dl {
   opacity: 1;
+}
+
+/* ── Fullscreen Message Overlay ── */
+.msg-fs {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.msg-fs-card {
+  width: 100%;
+  max-width: 920px;
+  height: 100%;
+  max-height: 100%;
+  background: var(--color-bg, #ffffff);
+  border-radius: 16px;
+  border: 1px solid var(--color-border);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.msg-fs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.msg-fs-tag {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.msg-fs-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.msg-fs-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: rgba(99, 102, 241, 0.06);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.msg-fs-btn:hover {
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--color-primary);
+  border-color: rgba(99, 102, 241, 0.3);
+}
+.msg-fs-btn:active {
+  transform: scale(0.96);
+}
+.msg-fs-btn--close {
+  padding: 0;
+  width: 34px;
+  justify-content: center;
+}
+.msg-fs-btn .check-icon { display: none; }
+.msg-fs-btn.copied .copy-icon { display: none; }
+.msg-fs-btn.copied .check-icon {
+  display: inline-block;
+  color: var(--color-success, #10b981);
+}
+.msg-fs-btn-label { line-height: 1; }
+
+.msg-fs-body {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 24px 28px 40px;
+  font-size: 15px;
+  line-height: 1.75;
+  color: var(--color-text);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+/* 放大版 Markdown 排版（继承全局 .text.markdown 基础样式后覆盖尺寸） */
+.msg-fs-body.markdown { font-size: 15px; line-height: 1.8; }
+.msg-fs-body.markdown p { margin: 0 0 12px; }
+.msg-fs-body.markdown h1 { font-size: 22px; margin: 20px 0 10px; }
+.msg-fs-body.markdown h2 { font-size: 19px; margin: 18px 0 8px; }
+.msg-fs-body.markdown h3 { font-size: 16px; margin: 14px 0 6px; }
+.msg-fs-body.markdown ul,
+.msg-fs-body.markdown ol { padding-left: 24px; margin: 8px 0 12px; }
+.msg-fs-body.markdown li { margin: 4px 0; }
+.msg-fs-body.markdown blockquote { margin: 12px 0; padding: 8px 14px; }
+.msg-fs-body.markdown table { font-size: 13.5px; }
+.msg-fs-body.markdown .code-block pre { font-size: 13.5px; }
+
+.msg-fs-images {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.msg-fs-img {
+  max-width: 100%;
+  border-radius: 10px;
+  cursor: pointer;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* 进入/离开过渡 */
+.msg-fs-enter-active,
+.msg-fs-leave-active {
+  transition: opacity 0.25s ease;
+}
+.msg-fs-enter-from,
+.msg-fs-leave-to {
+  opacity: 0;
+}
+.msg-fs-enter-active .msg-fs-card,
+.msg-fs-leave-active .msg-fs-card {
+  transition: transform 0.25s ease;
+}
+.msg-fs-enter-from .msg-fs-card,
+.msg-fs-leave-to .msg-fs-card {
+  transform: scale(0.96);
+}
+
+/* 移动端适配：全屏铺满 */
+@media (max-width: 600px) {
+  .msg-fs { padding: 0; }
+  .msg-fs-card { border-radius: 0; max-width: 100%; }
+  .msg-fs-header { padding: 12px 14px; }
+  .msg-fs-body { padding: 16px 16px 32px; }
+  .msg-fs-btn-label { display: none; }
 }
 </style>

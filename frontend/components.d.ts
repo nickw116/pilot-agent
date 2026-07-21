@@ -21,7 +21,6 @@ declare module 'vue' {
     SessionList: typeof import('./src/components/SessionList.vue')['default']
     SessionMonitor: typeof import('./src/components/SessionMonitor.vue')['default']
     SettingsPopup: typeof import('./src/components/SettingsPopup.vue')['default']
-    VanActionSheet: typeof import('vant/es')['ActionSheet']
     VanButton: typeof import('vant/es')['Button']
     VanCell: typeof import('vant/es')['Cell']
     VanCellGroup: typeof import('vant/es')['CellGroup']
@@ -29,6 +28,7 @@ declare module 'vue' {
     VanIcon: typeof import('vant/es')['Icon']
     VanLoading: typeof import('vant/es')['Loading']
     VanNavBar: typeof import('vant/es')['NavBar']
+    VanPopover: typeof import('vant/es')['Popover']
     VanPopup: typeof import('vant/es')['Popup']
   }
 }

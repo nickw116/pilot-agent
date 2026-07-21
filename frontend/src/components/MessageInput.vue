@@ -1,5 +1,7 @@
 <template>
   <div class="input-area">
+    <!-- 可选 banner 插槽（如 monitor 模式） -->
+    <slot name="banner"></slot>
     <!-- 附件预览 -->
     <div class="attachment-preview" v-if="attachments.length > 0">
       <div
@@ -17,71 +19,82 @@
       </div>
     </div>
 
-    <div class="input-bar">
+    <div class="input-container">
       <input type="file" ref="fileInputRef" accept="image/*,video/*,audio/*,application/*,text/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.7z,.csv,.json,.xml,.html,.css,.js,.py,.java,.md" style="display: none" @change="handleFileSelect" />
-      <van-button
-        size="small"
-        class="attach-btn"
-        @click="fileInputRef?.click()"
-        :disabled="uploading || loading"
-        title="附件"
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-        </svg>
-      </van-button>
-      <van-button
-        size="small"
-        :class="['voice-btn', { 'voice-btn--active': voiceRecording, 'voice-btn--processing': voiceProcessing }]"
-        @click="toggleVoice"
-        :disabled="loading || voiceProcessing"
-        :title="voiceRecording ? '点击停止录音' : (voiceProcessing ? '正在识别...' : '语音输入')"
-      >
-        <svg v-if="!voiceProcessing" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-          <line x1="12" y1="19" x2="12" y2="23"/>
-          <line x1="8" y1="23" x2="16" y2="23"/>
-        </svg>
-        <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="voice-spin">
-          <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-        </svg>
-        <span v-if="voiceRecording" class="voice-dot"></span>
-      </van-button>
-      <div class="input-wrapper">
+
+      <!-- 文本区 + 发送 -->
+      <div class="input-row">
         <van-field
           :model-value="modelValue"
-          :placeholder="voiceProcessing ? '正在识别语音...' : (uploading ? `上传中 ${uploadProgress}%...` : (attachments.length ? '添加文字说明（可选）...' : '输入消息，可粘贴图片...'))"
+          :placeholder="voiceProcessing ? '正在识别语音...' : (uploading ? `上传中 ${uploadProgress}%...` : (attachments.length ? '添加文字说明（可选）...' : '发消息...'))"
           :border="false"
           type="textarea"
           rows="1"
-          autosize
+          :autosize="{ maxHeight: 160, minHeight: 24 }"
           class="input-field"
           :disabled="uploading"
           @update:model-value="$emit('update:modelValue', $event)"
           @keydown.enter.exact="onSend"
+          @keydown.enter.ctrl.prevent="insertNewline"
           @paste="handlePaste"
           @drop="handleDrop"
         />
-        <van-button
-          size="small"
+        <button
+          type="button"
           class="send-btn"
           @click="onSend"
           :disabled="(!modelValue.trim() && !attachments.length) || uploading"
           title="发送"
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="22" y1="2" x2="11" y2="13"></line>
-            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="19" x2="12" y2="5"/>
+            <polyline points="5 12 12 5 19 12"/>
           </svg>
-        </van-button>
+        </button>
+      </div>
+
+      <!-- 底部操作行：附件 + 模型选择 + 麦克风 -->
+      <div class="action-row">
+        <div class="action-row__left">
+          <button
+            type="button"
+            class="attach-btn"
+            @click="fileInputRef?.click()"
+            :disabled="uploading || loading"
+            title="附件"
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"/>
+              <line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+          </button>
+          <slot name="action-extra"></slot>
+        </div>
+        <button
+          type="button"
+          :class="['mic-btn', { 'mic-btn--active': voiceRecording, 'mic-btn--processing': voiceProcessing }]"
+          @click="toggleVoice"
+          :disabled="loading || voiceProcessing"
+          :title="voiceRecording ? '点击停止录音' : (voiceProcessing ? '正在识别...' : '语音输入')"
+        >
+          <svg v-if="!voiceProcessing" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="23"/>
+            <line x1="8" y1="23" x2="16" y2="23"/>
+          </svg>
+          <svg v-else width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="voice-spin">
+            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+          </svg>
+          <span v-if="voiceRecording" class="mic-dot"></span>
+        </button>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onUnmounted } from 'vue'
+import { ref, nextTick, onUnmounted } from 'vue'
 import { showImagePreview, showNotify } from 'vant'
 import { API_BASE, TOKEN_KEY } from '../constants/index.js'
 
@@ -236,6 +249,19 @@ function renameFile(file) {
   return new File([file], `${ts}_${base}${ext}`, { type: file.type })
 }
 
+function insertNewline(e) {
+  const ta = e.target
+  const start = ta.selectionStart
+  const end = ta.selectionEnd
+  const value = props.modelValue || ''
+  const newValue = value.slice(0, start) + '\n' + value.slice(end)
+  emit('update:modelValue', newValue)
+  nextTick(() => {
+    ta.focus()
+    ta.selectionStart = ta.selectionEnd = start + 1
+  })
+}
+
 function onSend(e) {
   if (props.uploading) {
     e?.preventDefault?.()
@@ -282,67 +308,87 @@ function handleDrop(e) {
 </script>
 
 <style>
-/* ── Input Area ── */
+/* ── Input Area (truly floating: absolute over content, fully transparent) ── */
 .input-area {
-  position: relative;
-  flex-shrink: 0;
-  background: var(--color-bg-secondary);
-  border-top: 1px solid var(--color-border);
-  padding-top: 8px;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  background: transparent;
+  padding: 10px 0 max(8px, env(safe-area-inset-bottom));
+  pointer-events: none;
 }
 
-/* ── Attach Button ── */
-.attach-btn {
-  width: 36px;
-  height: 36px;
+/* ── Input Container (floating centered rounded white pill) ── */
+.input-container {
+  width: auto;
+  max-width: 720px;
+  margin: 0 auto;
+  background: #FFFFFF;
+  border: 1px solid var(--color-border);
+  border-radius: 22px;
+  box-shadow: var(--shadow-lg);
+  padding: 8px 10px 8px 14px;
+  pointer-events: auto;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.input-container:focus-within {
+  border-color: rgba(var(--color-primary-rgb), 0.35);
+  box-shadow: 0 4px 16px rgba(var(--color-primary-rgb), 0.08);
+}
+
+/* ── Input Row (text area + mic) ── */
+.input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+.input-field.van-cell {
+  flex: 1;
+  background: transparent;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  padding: 6px 0;
+  font-size: 15px;
+  line-height: 1.5;
+}
+.input-field .van-field__control {
+  color: var(--color-text);
+}
+.input-field .van-field__control::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* ── Mic Button (inside input, right) ── */
+.mic-btn {
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-}
-.attach-btn.van-button {
-  background: var(--color-bg-glass);
-  border: 1px solid var(--color-border);
+  background: transparent;
+  border: none;
   color: var(--color-text-secondary);
-}
-.attach-btn:active { transform: scale(0.92); }
-.attach-btn.van-button--disabled {
-  opacity: 0.5;
-  color: var(--color-text-muted);
-}
-
-/* ── Voice Button ── */
-.voice-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
+  cursor: pointer;
   position: relative;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
-.voice-btn.van-button {
-  background: var(--color-bg-glass);
-  border: 1px solid var(--color-border);
-  color: var(--color-text-secondary);
-}
-.voice-btn:active { transform: scale(0.92); }
-.voice-btn.van-button--disabled {
-  opacity: 0.5;
-  color: var(--color-text-muted);
-}
-.voice-btn--active.van-button {
+.mic-btn:active { transform: scale(0.92); }
+.mic-btn:hover:not(:disabled) { background: var(--color-bg-secondary); }
+.mic-btn:disabled { opacity: 0.4; }
+.mic-btn--active {
   background: var(--color-danger);
   color: #FFFFFF;
-  border-color: var(--color-danger);
   animation: voice-pulse 1.2s ease-in-out infinite;
 }
-.voice-dot {
+.mic-dot {
   position: absolute;
-  bottom: 2px;
-  right: 2px;
+  top: 3px;
+  right: 3px;
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -350,23 +396,79 @@ function handleDrop(e) {
   animation: dot-blink 0.8s ease-in-out infinite;
 }
 @keyframes voice-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.4); }
-  50% { box-shadow: 0 0 0 8px rgba(255, 71, 87, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
 }
 @keyframes dot-blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
 }
-.voice-btn--processing.van-button {
-  background: var(--color-primary);
-  color: #FFFFFF;
-  border-color: var(--color-primary);
+.mic-btn--processing {
+  color: var(--color-primary);
 }
 .voice-spin {
   animation: voice-spin-anim 1s linear infinite;
 }
 @keyframes voice-spin-anim {
   to { transform: rotate(360deg); }
+}
+
+/* ── Action Row (attach + send, bottom of container) ── */
+.action-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 4px;
+}
+.action-row__left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+/* ── Attach Button (Doubao "+" style) ── */
+.attach-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.attach-btn:active { transform: scale(0.92); }
+.attach-btn:hover:not(:disabled) { background: var(--color-bg-secondary); color: var(--color-text); }
+.attach-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Send Button (Doubao style: filled circle on right) ── */
+.send-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--color-primary);
+  border: none;
+  color: #FFFFFF;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(var(--color-primary-rgb), 0.25);
+  transition: transform var(--transition-fast), opacity var(--transition-fast), background var(--transition-fast);
+}
+.send-btn:active { transform: scale(0.92); }
+.send-btn:disabled {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+  box-shadow: none;
+  cursor: not-allowed;
 }
 
 /* ── Attachment Preview ── */
@@ -376,6 +478,9 @@ function handleDrop(e) {
   padding: 8px 14px 0;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  pointer-events: auto;
+  max-width: 720px;
+  margin: 0 auto;
 }
 .attachment-item {
   position: relative;
@@ -388,7 +493,7 @@ function handleDrop(e) {
   border-radius: 10px;
   overflow: hidden;
   border: 2px solid var(--color-border);
-  background: var(--color-bg-glass);
+  background: #FFFFFF;
   cursor: pointer;
 }
 .attachment-thumb img {
@@ -411,7 +516,7 @@ function handleDrop(e) {
   border-radius: 50%;
   background: var(--color-danger);
   color: white;
-  border: 2px solid var(--color-bg-secondary);
+  border: 2px solid var(--color-bg);
   font-size: 13px;
   line-height: 1;
   display: flex;
@@ -419,73 +524,18 @@ function handleDrop(e) {
   justify-content: center;
   cursor: pointer;
   padding: 0;
-  box-shadow: 0 2px 6px rgba(255, 71, 87, 0.4);
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.4);
 }
 .attachment-remove:active {
   transform: scale(0.85);
 }
 
-/* ── Input Bar ── */
-.input-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  padding-bottom: max(6px, env(safe-area-inset-bottom));
-  margin: 0 12px 8px;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: 24px;
-  box-shadow: var(--shadow-sm);
-}
-/* ── Input Wrapper (field + send/stop button) ── */
-.input-wrapper {
-  display: flex;
-  align-items: center;
-  flex: 1;
-  background: transparent;
-  border-radius: 0;
-  border: none;
-  box-shadow: none;
-  padding: 0;
-  gap: 4px;
-}
-.input-field.van-cell {
-  flex: 1;
-  background: transparent;
-  border-radius: 0;
-  border: none;
-  box-shadow: none;
-  padding: 6px 10px;
-  font-size: 15px;
-}
-.input-field .van-field__control {
-  color: var(--color-text);
-}
-.input-field .van-field__control::placeholder {
-  color: var(--color-text-muted);
-}
-.send-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.send-btn.van-button {
-  background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
-  border: none;
-  color: #FFFFFF;
-  box-shadow: 0 0 12px rgba(99, 102, 241, 0.2);
-}
-.send-btn:active { transform: scale(0.92); }
-.send-btn.van-button--disabled {
-  background: var(--color-bg-glass);
-  border: 1px solid var(--color-border);
-  color: var(--color-text-muted);
-  box-shadow: none;
+/* ── Responsive: 手机端输入框保持悬浮居中，留出两侧边距 ── */
+@media (max-width: 768px) {
+  .input-container {
+    width: auto;
+    margin: 0 12px;
+  }
 }
 
 </style>

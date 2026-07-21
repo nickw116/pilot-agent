@@ -14,6 +14,7 @@
         :messages="messages"
         :input-text="inputText"
         :loading="loading"
+        :session-title="sessionTitle"
         :history-loading="historyLoading"
         :uploading="uploading"
         :upload-progress="uploadProgress"
@@ -32,6 +33,8 @@
         :monitor-user-info="monitorUserInfo"
         :monitor-loading="monitorLoading"
         :can-access-monitor="canAccessMonitor"
+        :agent-types="agentTypes"
+        :current-agent-type="currentAgentType"
         @update:input-text="inputText = $event"
         @send="handleSend"
         @abort="handleAbort"
@@ -40,6 +43,7 @@
         @open-settings="showSettings = true"
         @hot-refresh="handleHotRefresh"
         @switch-model="handleSwitchModel"
+        @switch-agent-type="handleSwitchAgentType"
         @open-monitor="showMonitor = true"
         @open-sessions="handleOpenSessions"
         @open-dashboard="showDashboard = true"
@@ -68,6 +72,7 @@
       :current-session-key="sessionKey"
       :current-agent-id="currentAgentId"
       :agents="agents"
+      :agent-types="agentTypes"
       @switch="handleSwitchSession"
       @new="handleNewSession"
       @delete="handleSessionListDelete"
@@ -104,7 +109,7 @@ import SessionMonitor from './components/SessionMonitor.vue'
 import SessionList from './components/SessionList.vue'
 import AgentDashboard from './components/AgentDashboard.vue'
 import SettingsPopup from './components/SettingsPopup.vue'
-import { API_BASE, API_SESSION, API_SESSIONS, API_SESSION_NEW, API_MODEL_SWITCH, API_ADMIN_SESSIONS, API_HISTORY, API_CHAT_V2, API_ABORT, API_AGENTS } from './constants/index.js'
+import { API_BASE, API_SESSION, API_SESSIONS, API_SESSION_NEW, API_MODEL_SWITCH, API_AGENT_TYPE_SWITCH, API_ADMIN_SESSIONS, API_HISTORY, API_CHAT_V2, API_ABORT, API_AGENTS, API_AGENT_TYPES } from './constants/index.js'
 
 const router = useRouter()
 
@@ -138,6 +143,7 @@ const {
   messages,
   inputText,
   loading,
+  sessionTitle,
   uploading,
   uploadProgress,
   attachments,
@@ -170,6 +176,10 @@ const {
       }, 300)
     }
   },
+  onAgentTypeUpdate: (agentType) => {
+    if (agentType) currentAgentType.value = agentType
+  },
+  getAgentType: () => currentAgentType.value,
 })
 
 // Persistent SSE event stream (Phase 2 — drives UI)
@@ -196,11 +206,10 @@ let _historyLoading = false
 // --- Monitor mode state ---
 const showMonitor = ref(false)
 const showSessionList = ref(false)
-const currentAgentId = computed(() => {
-  if (!currentUser.value) return 'user'
-  return currentUser.value.role === 'admin' ? 'main' : 'user'
-})
+const currentAgentId = computed(() => 'user')
 const agents = ref([])
+const agentTypes = ref([])
+const currentAgentType = ref('securities')
 const monitorMode = ref(false)
 const monitorSessionKey = ref('')
 const monitorMessages = ref([])
@@ -209,8 +218,7 @@ const monitorUserInfo = ref('')
 const monitorSending = ref(false)
 
 const canAccessMonitor = computed(() => {
-  return currentUser.value &&
-    (currentUser.value.allowedAgent === 'main' || currentUser.value.allowedAgent === 'dev')
+  return currentUser.value && currentUser.value.role === 'admin'
 })
 
 const monitorEventStream = useEventStream(token, monitorSessionKey, {
@@ -282,6 +290,7 @@ onMounted(async () => {
     _historyLoading = false
     fetchModel()
     fetchAgents()
+    fetchAgentTypes()
     eventStream.connect()
   } else if (router.currentRoute.value.name !== 'Login') {
     router.replace({ name: 'Login' })
@@ -380,6 +389,7 @@ async function handleLogin() {
     _historyLoading = false
     fetchModel()
     fetchAgents()
+    fetchAgentTypes()
     eventStream.connect()
     router.push({ name: 'Chat' })
   }
@@ -433,6 +443,23 @@ async function fetchAgents() {
     }
   } catch (err) {
     console.error('[App] fetch agents failed:', err)
+  }
+}
+
+async function fetchAgentTypes() {
+  try {
+    const r = await fetch(`${API_BASE}${API_AGENT_TYPES}`, {
+      headers: { Authorization: `Bearer ${token.value}` },
+    })
+    if (r.ok) {
+      const data = await r.json()
+      agentTypes.value = data.agentTypes || []
+      if (data.default && !currentAgentType.value) {
+        currentAgentType.value = data.default
+      }
+    }
+  } catch (err) {
+    console.error('[App] fetch agent types failed:', err)
   }
 }
 
@@ -516,6 +543,38 @@ async function handleSwitchModel(model) {
   } catch (err) {
     console.error('[App] switch model failed:', err)
     showNotify({ type: 'danger', message: '切换模型失败，请重试' })
+  }
+}
+
+async function handleSwitchAgentType(agentType) {
+  if (!agentType || agentType === currentAgentType.value) return
+  if (loading.value) {
+    showNotify({ type: 'warning', message: '正在生成中，请稍后切换' })
+    return
+  }
+  if (!sessionKey.value) {
+    currentAgentType.value = agentType
+    return
+  }
+  try {
+    const r = await fetch(`${API_BASE}${API_AGENT_TYPE_SWITCH}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token.value}`,
+      },
+      body: JSON.stringify({ session_key: sessionKey.value, agent_type: agentType }),
+    })
+    if (r.ok) {
+      const data = await r.json()
+      currentAgentType.value = data.agentType || agentType
+    } else {
+      const text = await r.text()
+      showNotify({ type: 'danger', message: `切换 Agent 失败: ${text}` })
+    }
+  } catch (err) {
+    console.error('[App] switch agent type failed:', err)
+    showNotify({ type: 'danger', message: '切换 Agent 失败，请重试' })
   }
 }
 
@@ -850,12 +909,13 @@ async function handleNewSession() {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token.value}`,
       },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ agent_type: currentAgentType.value }),
     })
     if (r.ok) {
       const data = await r.json()
       sessionKey.value = data.sessionKey
       messages.value = []
+      sessionTitle.value = ''
       currentModel.value = ''
       await fetchModel()
     }

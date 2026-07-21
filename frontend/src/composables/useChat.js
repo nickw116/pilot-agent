@@ -10,11 +10,12 @@ export function setStreamMode(mode) {
 }
 
 export function useChat(token, currentUser, sessionKey, options = {}) {
-  const { onModelUpdate } = options
+  const { onModelUpdate, onAgentTypeUpdate, getAgentType } = options
 
   // ── Shared state container ──
   const listRef = ref(null)
   const loading = ref(false)
+  const sessionTitle = ref('')
 
   function scrollToBottom() {
     requestAnimationFrame(() => {
@@ -32,8 +33,11 @@ export function useChat(token, currentUser, sessionKey, options = {}) {
     token,
     sessionKey,
     onModelUpdate,
+    onAgentTypeUpdate,
+    getAgentType: getAgentType || (() => null),
     loading,
     listRef,
+    sessionTitle,
     scrollToBottom,
     getStreamMode: () => _streamMode,
     // Mutable non-reactive coordination state (mutated by composables)
@@ -234,6 +238,7 @@ export function useChat(token, currentUser, sessionKey, options = {}) {
     messages,
     inputText: sendApi.inputText,
     loading,
+    sessionTitle,
     uploading: sendApi.uploading,
     uploadProgress: sendApi.uploadProgress,
     attachments: sendApi.attachments,

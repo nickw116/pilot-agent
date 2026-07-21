@@ -267,6 +267,7 @@ function fileExtIcon(name) {
 }
 .message-item.assistant {
   margin-right: auto;
+  max-width: 100%;
 }
 
 /* ── Bubble ── */
@@ -301,12 +302,7 @@ function fileExtIcon(name) {
   border-radius: 18px;
   border: 1px solid var(--color-border);
   box-shadow: var(--shadow-sm);
-  max-width: 85%;
-}
-@media (min-width: 1200px) {
-  .message-item.assistant .bubble {
-    max-width: 800px;
-  }
+  max-width: 100%;
 }
 .text { min-height: 8px; }
 

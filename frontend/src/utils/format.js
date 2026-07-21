@@ -24,6 +24,13 @@ function toDownloadUrl(path, token) {
   return toProxyUrl(path, token) + '&download=true'
 }
 
+// Resolve an `attachment://<filename>` reference (agent sometimes emits this
+// pseudo-protocol instead of a real path) via the backend attachment lookup.
+function toAttachmentUrl(name, token) {
+  const qs = token ? `&token=${encodeURIComponent(token)}` : ''
+  return `/api/resolve-attachment?name=${encodeURIComponent(name)}${qs}`
+}
+
 function pathBasename(p) {
   try { return decodeURIComponent(p.split('/').pop()) || 'file' } catch { return 'file' }
 }
@@ -35,13 +42,29 @@ export function detectMediaUrls(text, token = '') {
   const pdfs = []
   const files = []
 
-  // 1. 处理 markdown 图片 ![alt](url)：保留语法在文本中，仅把本地路径替换为 proxy URL
+  // 1. 处理 markdown 图片 ![alt](url)：保留语法在文本中，仅把本地路径 / attachment:// 替换为 proxy URL
   const mdImgRegex = /!\[([^\]]*)\]\(([^)\s]+)\)/g
   let cleaned = text.replace(mdImgRegex, (_match, alt, url) => {
     if (isLocalPath(url)) {
       return `![${alt}](${toProxyUrl(url, token)})`
     }
+    // attachment://<filename> → backend lookup
+    const att = url.match(/^attachment:\/\/(.+)$/i)
+    if (att) {
+      return `![${alt}](${toAttachmentUrl(att[1], token)})`
+    }
     return _match
+  })
+
+  // 1b. 裸 attachment://<filename>（未包裹在 markdown 图片语法中）→ 提取为图片
+  const bareAttRegex = /(?:^|(?<![\w/.\-]))attachment:\/\/([^\s)]+\.(?:jpe?g|png|gif|webp|svg|bmp|ico|pdf))/gi
+  cleaned = cleaned.replace(bareAttRegex, (_match, name) => {
+    if (/\.pdf$/i.test(name)) {
+      pdfs.push(toAttachmentUrl(name, token))
+    } else {
+      images.push(toAttachmentUrl(name, token))
+    }
+    return ''
   })
 
   // 2. 本地路径优先处理（避免后续 HTTP 正则改变周边字符导致匹配失败）

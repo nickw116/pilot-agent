@@ -141,10 +141,6 @@ const minimaxModel: Model<any> = {
   cost: { input: 1.0, output: 4.0, cacheRead: 0.1, cacheWrite: 0 },
   contextWindow: 1000000,
   maxTokens: 131072,
-  // MiniMax M3 用 `thinking: { type: "enabled" | "disabled" }` 控制思考，
-  // 复用 SDK 的 "deepseek" thinkingFormat 分支（openai-completions.js）生成该字段。
-  // 不设的话会落到 OpenAI 兜底分支，发出无效的 `reasoning_effort`，被 MiniMax 忽略。
-  compat: { thinkingFormat: "deepseek" },
 };
 
 
@@ -255,16 +251,28 @@ function getAgent(sessionKey: string, userId: number, modelId?: string, agentId?
 
   const fullSystemPrompt = agentBootstrap + userSection + skillSummary + memorySection + typeSuffix;
 
+  const isMinimax = resolvedModelId.includes("minimax");
+  const thinkingLevel = isMinimax ? "medium" : "off";
+
   const agent = new Agent({
     initialState: {
       systemPrompt: fullSystemPrompt,
       model,
       tools: userTools,
-      thinkingLevel: resolvedModelId.includes("minimax") ? "medium" : "off",
+      // MiniMax M3 只有 adaptive/disabled 两档，不认 SDK 标准的 medium/high。
+      // 这里用 "medium" 仅作"开启思考"的标记，真正的 thinking 字段在 onPayload 里修正。
+      thinkingLevel,
     },
     streamFn: streamWithFallback as any,
     onPayload: (payload) => {
       (payload as any).max_tokens = model.maxTokens;
+      // MiniMax M3 用 `thinking: { type: "adaptive" | "disabled" }` 控制思考，
+      // 不认 SDK 生成的 `reasoning_effort`（会被忽略）也不能用 `enabled`（会 400）。
+      // thinkingLevel 非 off → adaptive（开启，模型自决强度）；off → disabled。
+      if (isMinimax) {
+        (payload as any).thinking = { type: thinkingLevel === "off" ? "disabled" : "adaptive" };
+        delete (payload as any).reasoning_effort;
+      }
       return payload;
     },
     getApiKey: (provider: string) => {

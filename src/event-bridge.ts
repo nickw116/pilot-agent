@@ -29,10 +29,30 @@ function sse(
   };
 }
 
-let accumulatedText = "";
-let accumulatedThinking = "";
-let inThinkingBlock = false;
-let tagBuffer = "";
+// Per-sessionKey stream state. Previously these were module-level globals,
+// which caused concurrent sessions (and runs) to corrupt each other's
+// accumulated text / thinking buffers. Keying by sessionKey isolates each run.
+interface StreamState {
+  accumulatedText: string;
+  accumulatedThinking: string;
+  inThinkingBlock: boolean;
+  tagBuffer: string;
+}
+
+const streamStates = new Map<string, StreamState>();
+
+function getState(sessionKey: string): StreamState {
+  let s = streamStates.get(sessionKey);
+  if (!s) {
+    s = { accumulatedText: "", accumulatedThinking: "", inThinkingBlock: false, tagBuffer: "" };
+    streamStates.set(sessionKey, s);
+  }
+  return s;
+}
+
+function resetState(sessionKey: string): void {
+  streamStates.set(sessionKey, { accumulatedText: "", accumulatedThinking: "", inThinkingBlock: false, tagBuffer: "" });
+}
 
 function translate(
   event: AgentEvent,
@@ -41,10 +61,7 @@ function translate(
 ): SseEvent[] {
   switch (event.type) {
     case "agent_start":
-      accumulatedText = "";
-      accumulatedThinking = "";
-      inThinkingBlock = false;
-      tagBuffer = "";
+      resetState(sessionKey);
       return [sse("run.started", runId, sessionKey)];
 
     case "message_update": {
@@ -53,7 +70,7 @@ function translate(
         return handleTextDelta(sub.delta, runId, sessionKey);
       }
       if (sub.type === "thinking_delta" && sub.delta) {
-        accumulatedThinking += sub.delta;
+        getState(sessionKey).accumulatedThinking += sub.delta;
         return [sse("assistant.thinking", runId, sessionKey, { delta: sub.delta })];
       }
       if (sub.type === "toolcall_start") {
@@ -94,25 +111,29 @@ function translate(
     }
 
     case "agent_end": {
+      const st = getState(sessionKey);
       const flushEvents: SseEvent[] = [];
-      if (tagBuffer) {
-        if (inThinkingBlock) {
-          accumulatedThinking += tagBuffer;
-          flushEvents.push(sse("assistant.thinking", runId, sessionKey, { delta: tagBuffer }));
+      if (st.tagBuffer) {
+        if (st.inThinkingBlock) {
+          st.accumulatedThinking += st.tagBuffer;
+          flushEvents.push(sse("assistant.thinking", runId, sessionKey, { delta: st.tagBuffer }));
         } else {
-          accumulatedText += tagBuffer;
-          flushEvents.push(sse("assistant.delta", runId, sessionKey, { delta: tagBuffer }));
+          st.accumulatedText += st.tagBuffer;
+          flushEvents.push(sse("assistant.delta", runId, sessionKey, { delta: st.tagBuffer }));
         }
-        tagBuffer = "";
+        st.tagBuffer = "";
       }
       const done = sse("run.done", runId, sessionKey);
-      if (accumulatedText) {
-        return [
+      if (st.accumulatedText) {
+        const result = [
           ...flushEvents,
-          sse("full_result", runId, sessionKey, { text: accumulatedText }),
+          sse("full_result", runId, sessionKey, { text: st.accumulatedText }),
           done,
         ];
+        resetState(sessionKey);
+        return result;
       }
+      resetState(sessionKey);
       return [...flushEvents, done];
     }
 
@@ -134,31 +155,32 @@ function translate(
  * everything else is routed as assistant.delta.
  */
 function handleTextDelta(delta: string, runId: string, sessionKey: string): SseEvent[] {
+  const st = getState(sessionKey);
   const events: SseEvent[] = [];
-  const combined = tagBuffer + delta;
-  tagBuffer = "";
+  const combined = st.tagBuffer + delta;
+  st.tagBuffer = "";
   let text = combined;
 
   while (text.length > 0) {
-    if (inThinkingBlock) {
+    if (st.inThinkingBlock) {
       const closeIdx = text.indexOf("</think");
       if (closeIdx >= 0) {
         const closeEnd = text.indexOf(">", closeIdx);
         if (closeEnd >= 0) {
           const thinkingPart = text.substring(0, closeIdx);
           if (thinkingPart) {
-            accumulatedThinking += thinkingPart;
+            st.accumulatedThinking += thinkingPart;
             events.push(sse("assistant.thinking", runId, sessionKey, { delta: thinkingPart }));
           }
-          inThinkingBlock = false;
+          st.inThinkingBlock = false;
           text = text.substring(closeEnd + 1);
         } else {
           const thinkingPart = text.substring(0, closeIdx);
           if (thinkingPart) {
-            accumulatedThinking += thinkingPart;
+            st.accumulatedThinking += thinkingPart;
             events.push(sse("assistant.thinking", runId, sessionKey, { delta: thinkingPart }));
           }
-          tagBuffer = text.substring(closeIdx);
+          st.tagBuffer = text.substring(closeIdx);
           text = "";
         }
       } else {
@@ -166,12 +188,12 @@ function handleTextDelta(delta: string, runId: string, sessionKey: string): SseE
         if (partialPos >= 0) {
           const thinkingPart = text.substring(0, partialPos);
           if (thinkingPart) {
-            accumulatedThinking += thinkingPart;
+            st.accumulatedThinking += thinkingPart;
             events.push(sse("assistant.thinking", runId, sessionKey, { delta: thinkingPart }));
           }
-          tagBuffer = text.substring(partialPos);
+          st.tagBuffer = text.substring(partialPos);
         } else {
-          accumulatedThinking += text;
+          st.accumulatedThinking += text;
           events.push(sse("assistant.thinking", runId, sessionKey, { delta: text }));
         }
         text = "";
@@ -183,18 +205,18 @@ function handleTextDelta(delta: string, runId: string, sessionKey: string): SseE
         if (openEnd >= 0) {
           const textPart = text.substring(0, openIdx);
           if (textPart) {
-            accumulatedText += textPart;
+            st.accumulatedText += textPart;
             events.push(sse("assistant.delta", runId, sessionKey, { delta: textPart }));
           }
-          inThinkingBlock = true;
+          st.inThinkingBlock = true;
           text = text.substring(openEnd + 1);
         } else {
           const textPart = text.substring(0, openIdx);
           if (textPart) {
-            accumulatedText += textPart;
+            st.accumulatedText += textPart;
             events.push(sse("assistant.delta", runId, sessionKey, { delta: textPart }));
           }
-          tagBuffer = text.substring(openIdx);
+          st.tagBuffer = text.substring(openIdx);
           text = "";
         }
       } else {
@@ -202,12 +224,12 @@ function handleTextDelta(delta: string, runId: string, sessionKey: string): SseE
         if (partialPos >= 0) {
           const textPart = text.substring(0, partialPos);
           if (textPart) {
-            accumulatedText += textPart;
+            st.accumulatedText += textPart;
             events.push(sse("assistant.delta", runId, sessionKey, { delta: textPart }));
           }
-          tagBuffer = text.substring(partialPos);
+          st.tagBuffer = text.substring(partialPos);
         } else {
-          accumulatedText += text;
+          st.accumulatedText += text;
           events.push(sse("assistant.delta", runId, sessionKey, { delta: text }));
         }
         text = "";

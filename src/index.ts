@@ -700,6 +700,96 @@ app.get("/api/resolve-attachment", auth, (req, res) => {
   return res.status(404).json({ detail: "Not found" });
 });
 
+// --- File preview (inline, with office→PDF conversion) ---
+// Serves a workspace file inline for browser preview. Images/PDF/text are sent
+// directly; office docs (docx/pptx/xlsx/...) are converted to PDF via headless
+// LibreOffice with a mtime-keyed cache.
+const PREVIEW_IMAGE_EXTS = /\.(jpe?g|png|gif|webp|svg|bmp|ico)$/i;
+const PREVIEW_PDF_EXT = /\.pdf$/i;
+const PREVIEW_TEXT_EXTS = /\.(txt|md|markdown|csv|json|log|ya?ml|xml|html?|css|js|ts|sh|py|java|c|cc|cpp|h|hpp|rs|go|rb|php|sql|ini|conf|toml)$/i;
+const PREVIEW_OFFICE_EXTS = /\.(docx?|pptx?|xlsx?|odt|odp|ods|rtf)$/i;
+
+const PREVIEW_CACHE_DIR = path.join(WORKSPACE_ROOT, ".preview-cache");
+
+async function convertOfficeToPdf(srcPath: string): Promise<string | null> {
+  fs.mkdirSync(PREVIEW_CACHE_DIR, { recursive: true });
+  const stat = fs.statSync(srcPath);
+  const cacheKey = crypto.createHash("sha1").update(`${srcPath}:${stat.size}:${stat.mtimeMs}`).digest("hex");
+  const cachedPdf = path.join(PREVIEW_CACHE_DIR, `${cacheKey}.pdf`);
+  if (fs.existsSync(cachedPdf)) return cachedPdf;
+
+  const { execFile } = await import("child_process");
+  return new Promise((resolve) => {
+    execFile(
+      "soffice",
+      ["--headless", "--norestore", "--nolockcheck", "--convert-to", "pdf", "--outdir", PREVIEW_CACHE_DIR, srcPath],
+      { timeout: 45000, env: { ...process.env, HOME: process.env.HOME || "/tmp" } },
+      (err) => {
+        if (err) {
+          console.error("[preview] soffice conversion failed:", err.message);
+          resolve(null);
+          return;
+        }
+        const produced = path.join(PREVIEW_CACHE_DIR, path.basename(srcPath).replace(/\.[^.]+$/, "") + ".pdf");
+        if (fs.existsSync(produced)) {
+          try {
+            fs.renameSync(produced, cachedPdf);
+            resolve(cachedPdf);
+          } catch {
+            resolve(produced);
+          }
+        } else {
+          resolve(null);
+        }
+      }
+    );
+  });
+}
+
+app.get("/api/preview", auth, async (req, res) => {
+  const rawPath = (req.query.path as string || "").trim();
+  if (!rawPath) return res.status(400).json({ detail: "Missing path" });
+
+  const user = (req as any).user;
+  // Accept either an absolute path (must live under WORKSPACE_ROOT) or a path
+  // relative to the requesting user's agent workspace.
+  let resolved: string;
+  if (path.isAbsolute(rawPath)) {
+    resolved = path.resolve(rawPath);
+    if (!resolved.startsWith(WORKSPACE_ROOT + path.sep) && resolved !== WORKSPACE_ROOT) {
+      return res.status(403).json({ detail: "Path escapes workspace" });
+    }
+  } else {
+    const wsRoot = getUserWorkspaceDir(user.userId, "user");
+    resolved = path.resolve(wsRoot, rawPath);
+    if (!resolved.startsWith(wsRoot + path.sep) && resolved !== wsRoot) {
+      return res.status(403).json({ detail: "Path escapes workspace" });
+    }
+  }
+  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+    return res.status(404).json({ detail: "Not found" });
+  }
+
+  const basename = path.basename(resolved);
+
+  // Images / PDF / text: serve inline directly.
+  if (PREVIEW_IMAGE_EXTS.test(basename) || PREVIEW_PDF_EXT.test(basename) || PREVIEW_TEXT_EXTS.test(basename)) {
+    return res.sendFile(resolved);
+  }
+
+  // Office: convert to PDF then serve inline.
+  if (PREVIEW_OFFICE_EXTS.test(basename)) {
+    const pdfPath = await convertOfficeToPdf(resolved);
+    if (pdfPath && fs.existsSync(pdfPath)) {
+      return res.sendFile(pdfPath);
+    }
+    return res.status(502).json({ detail: "Office conversion failed", downloadable: true });
+  }
+
+  // Unsupported preview type: tell frontend to offer download instead.
+  return res.status(415).json({ detail: "Unsupported preview type", downloadable: true });
+});
+
 // --- Context stats ---
 
 app.get("/api/context/stats", auth, (req, res) => {

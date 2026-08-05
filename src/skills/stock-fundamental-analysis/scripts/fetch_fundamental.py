@@ -219,204 +219,75 @@ def save_cache(db_code: str, data: dict):
 
 # ── 输出格式化 ──
 
-def format_pe_comment(percentile) -> str:
-    """PE 分位评价"""
-    if percentile is None:
-        return "无数据"
-    if percentile > 70:
-        return "偏高"
-    elif percentile >= 30:
-        return "合理"
-    else:
-        return "偏低"
 
-
-def format_fund_change(change) -> str:
-    """基金持仓变动描述"""
-    if change is None:
-        return "无数据"
-    if change > 0:
-        return f"增加 {change:.2f} 亿"
-    elif change < 0:
-        return f"减少 {abs(change):.2f} 亿"
-    return "持平"
-
-
-def format_northbound_change(change) -> str:
-    """北向持仓变动描述"""
-    if change is None:
-        return "无数据"
-    if change > 0:
-        return f"加仓 {change:.2f} 亿"
-    elif change < 0:
-        return f"减仓 {abs(change):.2f} 亿"
-    return "持平"
 
 
 def format_report(stock: dict, peers: list[dict], jiuyan: dict, verbose: bool = False) -> str:
-    """格式化人类可读报告"""
+    """最小集行业报告（用户定制版，2026-07-23 重构）
+
+    只输出:股票代码、行业分类、龙头标记、主营业务描述、参考龙头列表。
+    不输出:估值水平(PE 已从本地 DB 清空)、资金动向(已清空)、价格行情。
+    实时估值/行情请走 check_pe_quality.py / westockdata skill。
+    """
     code = stock["stock_code"]
     name = stock["stock_name"]
+
+    # 行业分类（一/二/三级）
+    l1 = stock.get("industry_level1") or ""
+    l2 = stock.get("industry_level2") or ""
+    l3 = stock.get("industry_level3") or ""
+
+    if l1 and l2 and l3:
+        industry = f"{l1} → {l2} → {l3}"
+    elif l1 and l2:
+        industry = f"{l1} → {l2}"
+    elif l1:
+        industry = l1
+    else:
+        industry = "未分类"
+
+    # 龙头标记
+    is_leader = stock.get("is_leader") == "是"
+    leader_label = "✅ 行业龙头" if is_leader else "一般标的"
+
+    # 主营业务
+    description = stock.get("description") or "暂无描述"
+
+    # 同行业龙头列表
+    leader_peers = [
+        p for p in (peers or [])
+        if p.get("is_leader") == "是" and p["stock_code"] != code
+    ]
+
     lines = []
-
-    lines.append(f"## {name}（{code}）基本面分析\n")
-
-    # 一、核心结论（简要概述）
-    pe_comment = format_pe_comment(stock.get("pe_percentile"))
-    leader_tag = "行业龙头" if stock.get("is_leader") in ("1", 1, True, "是") else ""
-    is_leader_yes = stock.get("is_leader") in ("1", 1, True, "是")
-    industry = " → ".join(filter(None, [
-        stock.get("industry_level1", ""),
-        stock.get("industry_level2", ""),
-        stock.get("industry_level3", ""),
-    ]))
-    desc = stock.get("description") or "暂无描述"
-
-    conclusion_parts = [f"{name}（{code}）" ]
-    if leader_tag:
-        conclusion_parts.append(f"是{stock.get('industry_level3', '')}领域的{leader_tag}")
-    else:
-        conclusion_parts.append(f"属于{industry}行业")
-    conclusion_parts.append(f"，当前 PE 分位{pe_comment}")
-
-    if stock.get("fund_holding") is not None and stock["fund_holding"] > 5:
-        conclusion_parts.append("，公募持仓较高")
-    if stock.get("northbound_holding") is not None and stock["northbound_holding"] > 1:
-        conclusion_parts.append("，北向资金有持仓")
-
-    lines.append("### 一、核心结论")
-    lines.append("".join(conclusion_parts) + "。\n")
-
-    # 二、公司基本面
-    lines.append("### 二、公司基本面")
-    lines.append(f"- **主营业务**: {desc}")
-    if is_leader_yes:
-        lines.append(f"- **行业地位**: {leader_tag}")
-    lines.append(f"- **行业分类**: {industry}\n")
-
-    # 三、估值水平
-    pe_median = stock.get("pe_median")
-    pe_percentile = stock.get("pe_percentile")
-    lines.append("### 三、估值水平")
-    if pe_median is not None:
-        lines.append(f"- **PE 中值**: {pe_median:.2f}")
-    else:
-        lines.append("- **PE 中值**: 无数据")
-    if pe_percentile is not None:
-        lines.append(f"- **PE 历史分位**: {pe_percentile:.1f}%（{pe_comment}）")
-    else:
-        lines.append("- **PE 历史分位**: 无数据")
+    lines.append(f"## {name}（{code}）")
     lines.append("")
+    lines.append("### 公司基本面")
+    lines.append(f"- **股票代码**: {code}")
+    lines.append(f"- **所属行业**: {industry}")
+    lines.append(f"- **行业地位**: {leader_label}")
+    lines.append(f"- **主营业务**: {description}")
 
-    # 四、资金动向
-    lines.append("### 四、资金动向")
-    fund_h = stock.get("fund_holding")
-    fund_c = stock.get("fund_change")
-    if fund_h is not None:
-        fund_c_desc = format_fund_change(fund_c)
-        lines.append(f"- **公募持仓**: {fund_h:.2f} 亿元（{fund_c_desc}）")
-    else:
-        lines.append("- **公募持仓**: 无数据")
-
-    nb_h = stock.get("northbound_holding")
-    nb_c = stock.get("northbound_change")
-    if nb_h is not None:
-        nb_c_desc = format_northbound_change(nb_c)
-        lines.append(f"- **北向持仓**: {nb_h:.2f} 亿元（{nb_c_desc}）")
-    else:
-        lines.append("- **北向持仓**: 无数据")
-    lines.append("")
-
-    # 五、同行业 PE 对比
-    if peers:
-        lines.append("### 五、行业地位")
-        lines.append(f"在 {stock.get('industry_level3', '同行业')} 中的 PE 对比：")
+    if leader_peers:
         lines.append("")
-        lines.append("| 股票 | PE 中值 | PE 分位 | 龙头 |")
-        lines.append("|------|---------|---------|------|")
-        # 当前股票
-        pe_m = f"{pe_median:.1f}" if pe_median else "-"
-        pe_p = f"{pe_percentile:.1f}%" if pe_percentile else "-"
-        is_l = "是" if stock.get("is_leader") in ("1", 1, True, "是") else ""
-        lines.append(f"| **{name}** | **{pe_m}** | **{pe_p}** | {is_l} |")
-        for p in peers[:8]:
-            p_pe = f"{p['pe_median']:.1f}" if p.get("pe_median") else "-"
-            p_pct = f"{p['pe_percentile']:.1f}%" if p.get("pe_percentile") else "-"
-            p_lead = "是" if p.get("is_leader") in ("1", 1, True, "是") else ""
-            lines.append(f"| {p['stock_name']} | {p_pe} | {p_pct} | {p_lead} |")
-        lines.append("")
+        lines.append("### 同行业龙头（参考）")
+        for p in leader_peers[:10]:
+            entry = f"- {p['stock_name']}（{p['stock_code']}）"
+            parts = [p.get(k) or "" for k in ("industry_level1", "industry_level2", "industry_level3")]
+            parts = [x for x in parts if x]
+            if parts:
+                entry += f" — {' / '.join(parts)}"
+            lines.append(entry)
 
-    # 六、韭研公社题材参考
-    lines.append("### 六、韭研公社题材参考")
-    if jiuyan.get("available") and jiuyan.get("items"):
-        for item in jiuyan["items"][:3]:
-            if item.get("category"):
-                lines.append(f"- **板块**: {item['category']}")
-            if item.get("category_reason"):
-                lines.append(f"  - **催化剂**: {item['category_reason']}")
-            if item.get("expound"):
-                expound = item["expound"]
-                if verbose or len(expound) < 2000:
-                    lines.append(f"  - **解析**: {expound}")
-                else:
-                    lines.append(f"  - **解析**: {expound[:2000]}...")
-    else:
-        lines.append(f"*{jiuyan.get('warning', '韭研公社数据不可用')}*")
     lines.append("")
-
-    # 七、投资亮点与风险
-    lines.append("### 七、投资亮点与风险")
-    highlights = []
-    risks = []
-
-    # 基于数据自动生成
-    if leader_tag:
-        highlights.append(f"行业龙头，{stock.get('industry_level3', '')}领域领先企业")
-    if pe_percentile is not None and pe_percentile < 30:
-        highlights.append(f"估值处于历史低位（PE 分位 {pe_percentile:.1f}%）")
-    elif pe_percentile is not None and pe_percentile < 50:
-        highlights.append(f"估值处于合理偏低水平（PE 分位 {pe_percentile:.1f}%）")
-    if fund_h is not None and fund_h > 5:
-        highlights.append(f"公募基金重仓（{fund_h:.2f} 亿元）")
-    if nb_h is not None and nb_h > 1:
-        highlights.append(f"北向资金持仓（{nb_h:.2f} 亿元）")
-    if nb_c is not None and nb_c > 0:
-        highlights.append("北向资金近期加仓")
-
-    if pe_percentile is not None and pe_percentile > 70:
-        risks.append(f"估值偏高（PE 分位 {pe_percentile:.1f}%）")
-    if fund_c is not None and fund_c < -5:
-        risks.append(f"公募基金大幅减仓（{abs(fund_c):.2f} 亿元）")
-    if nb_c is not None and nb_c < 0:
-        risks.append(f"北向资金近期减仓（{abs(nb_c):.2f} 亿元）")
-    if not desc or desc == "暂无描述":
-        risks.append("缺少主营业务描述，信息不完整")
-
-    # 补充到至少 1 条
-    if not highlights:
-        highlights.append("数据有限，暂无明显亮点")
-    if not risks:
-        risks.append("投资有风险，以上分析仅供参考")
-
-    lines.append("- **亮点**:")
-    for h in highlights[:3]:
-        lines.append(f"  1. {h}")
-    lines.append("- **风险**:")
-    for r in risks[:3]:
-        lines.append(f"  1. {r}")
-    lines.append("")
-
-    # 数据来源
     lines.append("---")
     lines.append("")
     lines.append("### 📌 数据来源")
-    lines.append("- 行业/资金/描述/同行业对比：本地知识库 stocks_db（PostgreSQL）")
-    lines.append("- PE 估值（TTM，近五年分位）：AKShare 百度股市通（`check_pe_quality.py` 实时查询）")
-    if jiuyan.get("available"):
-        lines.append("- 题材/异动：韭研公社")
-    lines.append("")
+    lines.append("- 行业/龙头/描述:本地知识库 stocks_db（PostgreSQL）")
+    lines.append("- 实时估值/行情:`check_pe_quality.py`(PE TTM)/ `westockdata` skill")
 
-    return "\n".join(lines)
+    return chr(10).join(lines)
+
 
 
 def main():

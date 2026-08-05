@@ -1,0 +1,101 @@
+{
+  "stock": {
+    "code": "603986.SH",
+    "name": "兆易创新",
+    "description": "NOR Flash闪存全球第4，指纹芯片国内第3",
+    "pe_median": null,
+    "pe_percentile": null,
+    "industry": {
+      "level1": "电子",
+      "level2": "半导体",
+      "level3": "数字芯片设计"
+    },
+    "is_leader": "1",
+    "fund": {
+      "holding": null,
+      "change": null
+    },
+    "northbound": {
+      "holding": null,
+      "change": null
+    }
+  },
+  "peers": [
+    {
+      "code": "300223.SZ",
+      "name": "北京君正",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "1"
+    },
+    {
+      "code": "001309.SZ",
+      "name": "德明利",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "是"
+    },
+    {
+      "code": "603501.SH",
+      "name": "豪威集团",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "1"
+    },
+    {
+      "code": "688385.SH",
+      "name": "复旦微电",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "2"
+    },
+    {
+      "code": "301308.SZ",
+      "name": "江波龙",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "1"
+    },
+    {
+      "code": "603893.SH",
+      "name": "瑞芯微",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "2"
+    },
+    {
+      "code": "002049.SZ",
+      "name": "紫光国微",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "1"
+    },
+    {
+      "code": "300672.SZ",
+      "name": "国科微",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "5"
+    },
+    {
+      "code": "688608.SH",
+      "name": "恒玄科技",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "3"
+    },
+    {
+      "code": "688099.SH",
+      "name": "晶晨股份",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "1"
+    }
+  ],
+  "jiuyan": {
+    "available": false,
+    "warning": ""
+  },
+  "_report": "## 兆易创新（603986.SH）\n\n### 公司基本面\n- **股票代码**: 603986.SH\n- **所属行业**: 电子 → 半导体 → 数字芯片设计\n- **行业地位**: 一般标的\n- **主营业务**: NOR Flash闪存全球第4，指纹芯片国内第3\n\n### 同行业龙头（参考）\n- 德明利（001309.SZ）\n\n---\n\n### 📌 数据来源\n- 行业/龙头/描述:本地知识库 stocks_db（PostgreSQL）\n- 实时估值/行情:`check_pe_quality.py`(PE TTM)/ `westockdata` skill",
+  "cached_at": 1784884455.5784
+}

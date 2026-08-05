@@ -1,0 +1,101 @@
+{
+  "stock": {
+    "code": "688432.SH",
+    "name": "有研硅",
+    "description": null,
+    "pe_median": null,
+    "pe_percentile": null,
+    "industry": {
+      "level1": "电子",
+      "level2": "半导体",
+      "level3": "半导体材料"
+    },
+    "is_leader": "否",
+    "fund": {
+      "holding": null,
+      "change": null
+    },
+    "northbound": {
+      "holding": null,
+      "change": null
+    }
+  },
+  "peers": [
+    {
+      "code": "688126.SH",
+      "name": "沪硅产业",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "1"
+    },
+    {
+      "code": "688234.SH",
+      "name": "天岳先进",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "3"
+    },
+    {
+      "code": "301611.SZ",
+      "name": "珂玛科技",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "否"
+    },
+    {
+      "code": "002409.SZ",
+      "name": "雅克科技",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "1"
+    },
+    {
+      "code": "688233.SH",
+      "name": "神工股份",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "是"
+    },
+    {
+      "code": "688661.SH",
+      "name": "和林微纳",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "否"
+    },
+    {
+      "code": "688401.SH",
+      "name": "路维光电",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "8"
+    },
+    {
+      "code": "605358.SH",
+      "name": "立昂微",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "3"
+    },
+    {
+      "code": "002119.SZ",
+      "name": "康强电子",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "否"
+    },
+    {
+      "code": "300666.SZ",
+      "name": "江丰电子",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "1"
+    }
+  ],
+  "jiuyan": {
+    "available": false,
+    "warning": ""
+  },
+  "_report": "## 有研硅（688432.SH）\n\n### 公司基本面\n- **股票代码**: 688432.SH\n- **所属行业**: 电子 → 半导体 → 半导体材料\n- **行业地位**: 一般标的\n- **主营业务**: 暂无描述\n\n### 同行业龙头（参考）\n- 神工股份（688233.SH）\n\n---\n\n### 📌 数据来源\n- 行业/龙头/描述:本地知识库 stocks_db（PostgreSQL）\n- 实时估值/行情:`check_pe_quality.py`(PE TTM)/ `westockdata` skill",
+  "cached_at": 1784884486.1059003
+}

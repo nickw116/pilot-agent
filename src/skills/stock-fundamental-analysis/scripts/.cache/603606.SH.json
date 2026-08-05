@@ -1,0 +1,101 @@
+{
+  "stock": {
+    "code": "603606.SH",
+    "name": "东方电缆",
+    "description": "海缆第2",
+    "pe_median": null,
+    "pe_percentile": null,
+    "industry": {
+      "level1": "电力设备",
+      "level2": "电网设备",
+      "level3": "线缆部件及其他"
+    },
+    "is_leader": "2",
+    "fund": {
+      "holding": null,
+      "change": null
+    },
+    "northbound": {
+      "holding": null,
+      "change": null
+    }
+  },
+  "peers": [
+    {
+      "code": "605196.SH",
+      "name": "华通线缆",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "否"
+    },
+    {
+      "code": "603618.SH",
+      "name": "杭电股份",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "10"
+    },
+    {
+      "code": "600869.SH",
+      "name": "远东股份",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "1"
+    },
+    {
+      "code": "603530.SH",
+      "name": "神马电力",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "5"
+    },
+    {
+      "code": "000720.SZ",
+      "name": "新能泰山",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "否"
+    },
+    {
+      "code": "002309.SZ",
+      "name": "中利集团",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "否"
+    },
+    {
+      "code": "002498.SZ",
+      "name": "汉缆股份",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "5"
+    },
+    {
+      "code": "600577.SH",
+      "name": "精达股份",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "1"
+    },
+    {
+      "code": "300265.SZ",
+      "name": "通光线缆",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "否"
+    },
+    {
+      "code": "002300.SZ",
+      "name": "太阳电缆",
+      "pe_median": null,
+      "pe_percentile": null,
+      "is_leader": "是"
+    }
+  ],
+  "jiuyan": {
+    "available": false,
+    "warning": ""
+  },
+  "_report": "## 东方电缆（603606.SH）\n\n### 公司基本面\n- **股票代码**: 603606.SH\n- **所属行业**: 电力设备 → 电网设备 → 线缆部件及其他\n- **行业地位**: 一般标的\n- **主营业务**: 海缆第2\n\n### 同行业龙头（参考）\n- 太阳电缆（002300.SZ）\n\n---\n\n### 📌 数据来源\n- 行业/龙头/描述:本地知识库 stocks_db（PostgreSQL）\n- 实时估值/行情:`check_pe_quality.py`(PE TTM)/ `westockdata` skill",
+  "cached_at": 1784884454.9159381
+}

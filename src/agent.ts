@@ -141,6 +141,10 @@ const minimaxModel: Model<any> = {
   cost: { input: 1.0, output: 4.0, cacheRead: 0.1, cacheWrite: 0 },
   contextWindow: 1000000,
   maxTokens: 131072,
+  // MiniMax M3 用 `thinking: { type: "enabled" | "disabled" }` 控制思考，
+  // 复用 SDK 的 "deepseek" thinkingFormat 分支（openai-completions.js）生成该字段。
+  // 不设的话会落到 OpenAI 兜底分支，发出无效的 `reasoning_effort`，被 MiniMax 忽略。
+  compat: { thinkingFormat: "deepseek" },
 };
 
 

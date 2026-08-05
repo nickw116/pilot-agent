@@ -88,11 +88,13 @@ export function useSend(ctx, streamingApi) {
   const uploadProgress = ref(0)
   const attachments = ref([])
   const historyLoading = ref(false)
+  const pendingSteerMessages = ref([])
 
   ctx.inputText = inputText
   ctx.uploading = uploading
   ctx.uploadProgress = uploadProgress
   ctx.attachments = attachments
+  ctx.pendingSteerMessages = pendingSteerMessages
 
   const messages = ctx.messages
 
@@ -370,11 +372,31 @@ export function useSend(ctx, streamingApi) {
 
   function clearChat() {
     messages.value = []
+    pendingSteerMessages.value = []
+  }
+
+  // 把悬挂的 steer 消息 flush 到消息流末尾（作为正式消息）。
+  // success=true → 标记为已插入；false → 标记为发送失败但仍然展示。
+  function flushPendingSteerMessages(success = true) {
+    if (pendingSteerMessages.value.length === 0) return
+    for (const pm of pendingSteerMessages.value) {
+      messages.value.push({
+        id: pm.id,
+        role: 'user',
+        content: pm.content,
+        pending: false,
+        steerInserted: success,
+        steerFailed: !success,
+      })
+    }
+    pendingSteerMessages.value = []
+    ctx.scrollToBottom()
   }
 
   function reset() {
     ctx.state.cancelled = true
     messages.value = []
+    pendingSteerMessages.value = []
     inputText.value = ''
     ctx.loading.value = false
     ctx.state.abortController = null
@@ -475,25 +497,23 @@ export function useSend(ctx, streamingApi) {
       inputText.value = ''
       attachments.value = []
 
-      // 判断是否会走 steer（中间插入）路径：若 AI 正在回复，需要把用户消息
-      // 插到"当前流式回复气泡"的前面，而不是追加到列表末尾，否则插入的消息
-      // 会出现在回复之后，破坏对话顺序。
+      // 判断是否会走 steer（中间插入）路径：若 AI 正在回复，用户消息先
+      // 悬挂在输入框上方（pendingSteerMessages），等后端确认 steer 成功后
+      // 再统一 flush 到消息流末尾。不再 splice 到流式气泡前面，避免时序错乱。
       const willSteer = ctx.loading.value && ctx.state.currentRunId && ctx.getStreamMode() === 'events'
       const userMsg = { id: Date.now(), role: 'user', content: fullMessage, pending: true }
-      if (willSteer && ctx.state.aiMsg) {
-        const aiIdx = messages.value.indexOf(ctx.state.aiMsg)
-        if (aiIdx >= 0) {
-          messages.value.splice(aiIdx, 0, userMsg)
-        } else {
-          messages.value.push(userMsg)
-        }
+
+      if (willSteer) {
+        // 先悬挂在输入框上方，等后端确认
+        pendingSteerMessages.value.push({ ...userMsg, steerStatus: 'pending' })
+        ctx.scrollToBottom()
       } else {
         messages.value.push(userMsg)
+        ctx.scrollToBottom()
       }
-      ctx.scrollToBottom()
 
       // -- Steer mode: append message to active run --
-      if (ctx.loading.value && ctx.state.currentRunId && ctx.getStreamMode() === 'events') {
+      if (willSteer) {
         try {
           const resp = await fetch(`${API_BASE}${API_CHAT_APPEND}`, {
             method: 'POST',
@@ -506,11 +526,12 @@ export function useSend(ctx, streamingApi) {
               session_key: ctx.sessionKey.value,
             }),
           })
+          // 不论后端返回什么，悬挂消息都 flush 到消息流末尾（作为正式消息）
+          flushPendingSteerMessages(resp.ok)
           if (resp.ok) {
             const data = await resp.json()
             if (data.mode === 'steered') {
               console.debug('[useChat] message steered to active run')
-              userMsg.pending = false
               ctx.scrollToBottom()
               return
             }
@@ -519,6 +540,7 @@ export function useSend(ctx, streamingApi) {
           console.warn('[useChat] steer failed, falling back to normal send')
           showNotify({ type: 'warning', message: '未插入当前对话，已作为新消息发送' })
         } catch (err) {
+          flushPendingSteerMessages(false)
           console.warn('[useChat] steer request failed:', err)
           showNotify({ type: 'warning', message: '插入失败，已作为新消息发送' })
         }
@@ -680,6 +702,7 @@ export function useSend(ctx, streamingApi) {
     uploadProgress,
     attachments,
     historyLoading,
+    pendingSteerMessages,
     loadHistory,
     uploadFile,
     addAttachment,

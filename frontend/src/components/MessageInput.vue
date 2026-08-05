@@ -2,6 +2,22 @@
   <div class="input-area">
     <!-- 可选 banner 插槽（如 monitor 模式） -->
     <slot name="banner"></slot>
+
+    <!-- Steer 悬挂消息：AI 回复时插入的消息先浮在输入框上方，确认后再落入消息流 -->
+    <div class="steer-preview" v-if="pendingSteerMessages.length > 0">
+      <div
+        v-for="msg in pendingSteerMessages"
+        :key="msg.id"
+        class="steer-bubble"
+      >
+        <span class="steer-bubble__text">{{ msg.content }}</span>
+        <span class="steer-bubble__status">
+          <span class="steer-bubble__dot"></span>
+          插入中…
+        </span>
+      </div>
+    </div>
+
     <!-- 附件预览 -->
     <div class="attachment-preview" v-if="attachments.length > 0">
       <div
@@ -104,6 +120,7 @@ const props = defineProps({
   uploading: { type: Boolean, default: false },
   uploadProgress: { type: Number, default: 0 },
   attachments: { type: Array, default: () => [] },
+  pendingSteerMessages: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits([
@@ -481,6 +498,59 @@ function handleDrop(e) {
   pointer-events: auto;
   max-width: 720px;
   margin: 0 auto;
+}
+
+/* ── Steer Pending Preview (悬挂在输入框上方的待插入消息) ── */
+.steer-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 6px 14px 0;
+  max-width: 720px;
+  margin: 0 auto;
+  pointer-events: auto;
+  animation: fadeInUp 0.25s ease;
+}
+.steer-bubble {
+  max-width: 80%;
+  padding: 8px 12px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.06), rgba(139, 92, 246, 0.06));
+  border: 1px dashed rgba(99, 102, 241, 0.45);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: 0 1px 4px rgba(99, 102, 241, 0.06);
+}
+.steer-bubble__text {
+  white-space: pre-wrap;
+  opacity: 0.85;
+}
+.steer-bubble__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--color-primary);
+  font-weight: 500;
+}
+.steer-bubble__dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  animation: steer-blink 0.9s ease-in-out infinite;
+}
+@keyframes steer-blink {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.1); }
 }
 .attachment-item {
   position: relative;

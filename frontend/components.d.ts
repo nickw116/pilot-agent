@@ -13,6 +13,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     AcpLogPanel: typeof import('./src/components/AcpLogPanel.vue')['default']
     AgentDashboard: typeof import('./src/components/AgentDashboard.vue')['default']
+    FilePreviewDrawer: typeof import('./src/components/FilePreviewDrawer.vue')['default']
     MessageBubble: typeof import('./src/components/MessageBubble.vue')['default']
     MessageInput: typeof import('./src/components/MessageInput.vue')['default']
     MessageList: typeof import('./src/components/MessageList.vue')['default']

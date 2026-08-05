@@ -243,6 +243,7 @@ export function useChat(token, currentUser, sessionKey, options = {}) {
     uploadProgress: sendApi.uploadProgress,
     attachments: sendApi.attachments,
     historyLoading: sendApi.historyLoading,
+    pendingSteerMessages: sendApi.pendingSteerMessages,
     listRef,
     loadHistory: sendApi.loadHistory,
     send: sendApi.send,

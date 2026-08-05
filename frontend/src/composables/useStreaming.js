@@ -379,10 +379,9 @@ export function useStreaming(ctx) {
   }
 
   function handleRunError(payload, runId) {
-    if (runId && ctx.state.currentRunId && runId !== ctx.state.currentRunId) {
-      console.debug('[useChat] run.error ignored for stale runId:', runId, 'current:', ctx.state.currentRunId)
-      return
-    }
+    // NOTE: 不做 stale runId 检查。后端在 error 路径下，pi-agent-core 的 agent_end
+    // 会先经 bridge 发出 run.done（清空 currentRunId），随后 agent.ts 的 catch 才发
+    // run.error。若此处仍校验 runId 匹配，错误会被当成 stale 丢弃，用户看不到报错。
     const errorText = payload.error || ''
     ctx.loading.value = false
     if (ctx.state.aiMsg) ctx.state.aiMsg.isStreaming = false

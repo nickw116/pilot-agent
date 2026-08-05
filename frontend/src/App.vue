@@ -19,6 +19,7 @@
         :uploading="uploading"
         :upload-progress="uploadProgress"
         :attachments="attachments"
+        :pending-steer-messages="pendingSteerMessages"
         :format-file-size="formatFileSize"
         :file-icon="fileIcon"
         :service-status="serviceStatus"
@@ -50,6 +51,7 @@
         @monitor-send="handleMonitorSend"
         @monitor-abort="handleMonitorAbort"
         @exit-monitor="handleExitMonitor"
+        @preview-file="handlePreviewFile"
       />
     </router-view>
 
@@ -94,6 +96,11 @@
       @logout="handleLogout"
       @change-password="handleChangePassword"
     />
+
+    <FilePreviewDrawer
+      v-model:show="showFilePreview"
+      :file="previewFile"
+    />
   </div>
 </template>
 
@@ -109,6 +116,7 @@ import SessionMonitor from './components/SessionMonitor.vue'
 import SessionList from './components/SessionList.vue'
 import AgentDashboard from './components/AgentDashboard.vue'
 import SettingsPopup from './components/SettingsPopup.vue'
+import FilePreviewDrawer from './components/FilePreviewDrawer.vue'
 import { API_BASE, API_SESSION, API_SESSIONS, API_SESSION_NEW, API_MODEL_SWITCH, API_AGENT_TYPE_SWITCH, API_ADMIN_SESSIONS, API_HISTORY, API_CHAT_V2, API_ABORT, API_AGENTS, API_AGENT_TYPES } from './constants/index.js'
 
 const router = useRouter()
@@ -148,6 +156,7 @@ const {
   uploadProgress,
   attachments,
   historyLoading,
+  pendingSteerMessages,
   loadHistory,
   send: chatSend,
   abort: chatAbort,
@@ -196,6 +205,13 @@ const eventStream = useEventStream(token, sessionKey, {
 const showSettings = ref(false)
 const showDashboard = ref(false)
 const dashboardRef = ref(null)
+const showFilePreview = ref(false)
+const previewFile = ref(null)
+
+function handlePreviewFile(info) {
+  previewFile.value = info
+  showFilePreview.value = true
+}
 const currentModel = ref('')
 const models = ref([])
 const { serviceStatus } = useServiceStatus()

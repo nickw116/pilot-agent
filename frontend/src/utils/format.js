@@ -2,6 +2,7 @@ import { Marked } from 'marked'
 import hljs from 'highlight.js'
 import DOMPurify from 'dompurify'
 import { showImagePreview } from 'vant'
+import { API_BASE, TOKEN_KEY } from '../constants/index.js'
 
 /**
  * 检测文本中的媒体 URL（图片、PDF 和可下载文件）
@@ -142,6 +143,69 @@ export function previewImage(url, allImages = []) {
     startPosition: allImages.indexOf(url),
     closeable: true,
   })
+}
+
+// ── 文件预览类型判定 ──
+const PREVIEW_IMAGE_RE = /\.(jpe?g|png|gif|webp|svg|bmp|ico)(\?.*)?$/i
+const PREVIEW_PDF_RE = /\.pdf(\?.*)?$/i
+const PREVIEW_TEXT_RE = /\.(txt|md|markdown|csv|json|log|ya?ml|xml|html?|css|js|ts|sh|py|java|c|cc|cpp|h|hpp|rs|go|rb|php|sql|ini|conf|toml)(\?.*)?$/i
+const PREVIEW_OFFICE_RE = /\.(docx?|pptx?|xlsx?|odt|odp|ods|rtf)(\?.*)?$/i
+
+/**
+ * 从任意来源（URL 字符串 或 文件对象）提取文件路径。
+ * 支持 /api/local-file?path= 、/api/download?path= 、/api/resolve-attachment?name= 、裸路径、http URL
+ */
+function extractFilePath(input) {
+  if (!input) return ''
+  const url = typeof input === 'string' ? input : (input.url || input.path || '')
+  try {
+    // 已经是 URL 形式，尝试解析 query
+    const u = new URL(url, 'http://dummy')
+    const p = u.searchParams.get('path')
+    if (p) return p
+    const n = u.searchParams.get('name')
+    if (n) return n
+    // 无 query 的 path（可能是裸路径）
+    if (u.pathname && u.pathname !== '/' && !u.host.includes('dummy')) return u.pathname
+  } catch {
+    // 不是 URL，当作裸路径
+    return url
+  }
+  return url
+}
+
+function fileExt(name) {
+  const m = /\.([a-zA-Z0-9]+)(\?|$)/.exec(name || '')
+  return m ? ('.' + m[1].toLowerCase()) : ''
+}
+
+/**
+ * 判定一个文件的可预览性，返回预览描述对象。
+ * @param {string|object} input  URL 字符串 或 { url, filename/name }
+ * @param {string} token         当前 token（用于构建带鉴权的预览 URL）
+ * @returns {{ previewType: 'image'|'pdf'|'text'|'office'|'other', filename, previewUrl, downloadUrl, rawUrl }}
+ */
+export function getPreviewInfo(input, token = '') {
+  const rawUrl = typeof input === 'string' ? input : (input?.url || '')
+  const explicitName = typeof input === 'object' ? (input?.filename || input?.name) : ''
+  const filePath = extractFilePath(input)
+  const name = explicitName || pathBasename(filePath) || rawUrl
+  const ext = fileExt(name) || fileExt(filePath)
+
+  let previewType = 'other'
+  if (PREVIEW_IMAGE_RE.test(name) || PREVIEW_IMAGE_RE.test(filePath)) previewType = 'image'
+  else if (PREVIEW_PDF_RE.test(name) || PREVIEW_PDF_RE.test(filePath)) previewType = 'pdf'
+  else if (PREVIEW_TEXT_RE.test(name) || PREVIEW_TEXT_RE.test(filePath)) previewType = 'text'
+  else if (PREVIEW_OFFICE_RE.test(name) || PREVIEW_OFFICE_RE.test(filePath)) previewType = 'office'
+
+  // 构建带 token 的 inline 预览 URL（指向后端 /api/preview，用 API_BASE 前缀以兼容生产部署）
+  const qs = token ? `&token=${encodeURIComponent(token)}` : ''
+  const previewUrl = filePath ? `${API_BASE}/preview?path=${encodeURIComponent(filePath)}${qs}` : rawUrl
+
+  // 下载 URL：优先复用原始 URL，否则用 preview path + download
+  const downloadUrl = rawUrl || (filePath ? `${previewUrl}&download=true` : '')
+
+  return { previewType, filename: name || '文件', previewUrl, downloadUrl, rawUrl }
 }
 
 // Configure marked with highlight.js

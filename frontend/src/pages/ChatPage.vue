@@ -98,7 +98,9 @@
       :acp-logs="props.acpLogs"
       :acp-status="props.acpStatus"
       :current-agent-id="props.currentAgentId"
+      :token="sessionToken"
       @load-more="emit('load-more')"
+      @preview-file="(info) => emit('preview-file', info)"
     />
 
     <!-- Monitor mode: interactive banner + input -->
@@ -144,6 +146,7 @@
       :uploading="uploading"
       :upload-progress="uploadProgress"
       :attachments="attachments"
+      :pending-steer-messages="props.pendingSteerMessages"
       @send="send"
       @abort="abort"
       @upload="(file) => $emit('upload', file)"
@@ -212,6 +215,7 @@ const props = defineProps({
   uploading: { type: Boolean, default: false },
   uploadProgress: { type: Number, default: 0 },
   attachments: { type: Array, default: () => [] },
+  pendingSteerMessages: { type: Array, default: () => [] },
   formatFileSize: { type: Function, default: () => '' },
   fileIcon: { type: Function, default: () => '📄' },
   serviceStatus: { type: String, default: 'up' },  // 'up' | 'down' | 'recovered'
@@ -234,7 +238,9 @@ const props = defineProps({
   currentAgentType: { type: String, default: 'securities' },
 })
 
-const emit = defineEmits(['update:inputText', 'send', 'abort', 'upload', 'remove-attachment', 'open-settings', 'hot-refresh', 'switch-model', 'switch-agent-type', 'load-more', 'open-sessions', 'open-monitor', 'open-dashboard', 'monitor-send', 'monitor-abort', 'exit-monitor'])
+const emit = defineEmits(['update:inputText', 'send', 'abort', 'upload', 'remove-attachment', 'open-settings', 'hot-refresh', 'switch-model', 'switch-agent-type', 'load-more', 'open-sessions', 'open-monitor', 'open-dashboard', 'monitor-send', 'monitor-abort', 'exit-monitor', 'preview-file'])
+
+const sessionToken = sessionStorage.getItem(TOKEN_KEY) || ''
 
 // ── 模型选择器 ──
 const modelPickerVisible = ref(false)

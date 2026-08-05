@@ -40,14 +40,14 @@
                 class="pdf-card"
               >
                 <a
-                  :href="pdfUrl"
-                  target="_blank"
+                  href="javascript:void(0)"
                   rel="noopener"
                   class="pdf-card-link"
+                  @click.prevent="previewByUrl(pdfUrl)"
                 >
                   <span class="pdf-icon">📄</span>
                   <span class="pdf-name">{{ pdfFileName(pdfUrl) }}</span>
-                  <span class="pdf-action">查看</span>
+                  <span class="pdf-action">预览</span>
                 </a>
                 <button
                   type="button"
@@ -75,7 +75,7 @@
               v-for="(file, idx) in msg.files"
               :key="file.url"
               class="file-card"
-              @click="handleDownload(file)"
+              @click="handleFileClick(file)"
             >
               <span class="file-card-icon">{{ fileIcon(file.content_type) }}</span>
               <div class="file-card-info">
@@ -185,7 +185,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { formatText, renderMarkdown, previewImage } from '../utils/format.js'
+import { formatText, renderMarkdown, previewImage, getPreviewInfo } from '../utils/format.js'
 import { downloadFile } from '../utils/download.js'
 import { showNotify } from 'vant'
 import AcpLogPanel from './AcpLogPanel.vue'
@@ -198,9 +198,10 @@ const props = defineProps({
   acpLogs: { type: Array, default: () => [] },
   acpStatus: { type: String, default: '' },
   currentAgentId: { type: String, default: 'user' },
+  token: { type: String, default: '' },
 })
 
-const emit = defineEmits(['load-more'])
+const emit = defineEmits(['load-more', 'preview-file'])
 
 const listRef = ref(null)
 const BOTTOM_THRESHOLD = 100
@@ -251,6 +252,23 @@ function downloadMediaUrl(url) {
   downloadFile({ url, filename })
 }
 
+// ── 文件预览 ──
+// 文件卡片点击：可预览类型弹抽屉，否则直接下载
+function handleFileClick(file) {
+  const info = getPreviewInfo(file, props.token)
+  if (info.previewType === 'other') {
+    handleDownload(file)
+  } else {
+    emit('preview-file', info)
+  }
+}
+
+// PDF / 媒体卡片点击：用 URL 构建预览信息
+function previewByUrl(url) {
+  const info = getPreviewInfo(url, props.token)
+  emit('preview-file', info)
+}
+
 function handleBubbleCopy(e, msg) {
   const text = getMsgRenderText(msg) || msg.content || ''
   navigator.clipboard.writeText(text).then(() => {
@@ -276,6 +294,28 @@ function handleCodeCopy(e) {
       btn.classList.remove('copied')
     }, 2000)
   }).catch(() => {})
+}
+
+// 拦截 markdown 中指向本地文件的 <a> 链接，改为抽屉预览。
+// 仅拦截 /api/local-file、/api/download、/api/resolve-attachment 或带可预览扩展名的链接；
+// 普通网页链接放行。
+function interceptFileLink(e) {
+  const a = e.target.closest('a')
+  if (!a) return false
+  const href = a.getAttribute('href') || ''
+  if (!href || href === 'javascript:void(0)' || href.startsWith('#')) return false
+  // 仅处理指向后端文件接口或本地路径的链接
+  const isApiFile = /\/api\/(local-file|download|resolve-attachment|preview)/.test(href)
+  const info = getPreviewInfo(href, props.token)
+  if (!isApiFile && info.previewType === 'other') return false
+  // 可预览：拦截，弹抽屉（图片仍走全屏灯箱体验更好）
+  e.preventDefault()
+  if (info.previewType === 'image') {
+    previewImage(info.previewUrl)
+  } else {
+    emit('preview-file', info)
+  }
+  return true
 }
 
 function scrollToBottom() {
@@ -310,7 +350,10 @@ watch(
 
 onMounted(() => {
   listRef.value?.addEventListener('scroll', handleScroll, { passive: true })
-  listRef.value?.addEventListener('click', handleCodeCopy)
+  listRef.value?.addEventListener('click', (e) => {
+    if (interceptFileLink(e)) return
+    handleCodeCopy(e)
+  })
   scrollToBottom()
 })
 
@@ -353,6 +396,7 @@ function copyFullscreen() {
 }
 
 function onFullscreenClick(e) {
+  if (interceptFileLink(e)) return
   handleCodeCopy(e)
   const img = e.target.closest('img')
   if (img && img.src) {

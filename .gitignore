@@ -12,3 +12,4 @@ users.db
 .claude/
 .clawhub/
 user_addons/
+.cache/

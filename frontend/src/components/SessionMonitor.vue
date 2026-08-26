@@ -77,7 +77,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { showConfirmDialog } from 'vant'
+import { showConfirmDialog, showNotify } from 'vant'
 import { API_BASE, API_ADMIN_SESSIONS } from '../constants/index.js'
 
 const props = defineProps({
@@ -164,9 +164,13 @@ async function handleDelete(s) {
     if (r.ok) {
       sessions.value = sessions.value.filter(x => x.sessionKey !== s.sessionKey)
       emit('delete', s.sessionKey)
+    } else {
+      const data = await r.json().catch(() => null)
+      showNotify({ type: 'danger', message: `删除失败: ${data?.detail || `错误码 ${r.status}`}` })
     }
   } catch (err) {
     console.error('[SessionMonitor] delete failed:', err)
+    showNotify({ type: 'danger', message: '删除失败，请检查网络后重试' })
   }
 }
 

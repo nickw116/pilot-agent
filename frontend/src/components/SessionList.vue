@@ -3,16 +3,20 @@
     <div class="session-panel">
       <!-- Header -->
       <div class="session-header">
-        <h3>会话列表</h3>
-        <van-button size="small" class="new-session-btn" @click="handleNew">
-          <span class="new-session-btn__content">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-              <line x1="12" y1="5" x2="12" y2="19"/>
-              <line x1="5" y1="12" x2="19" y2="12"/>
-            </svg>
-            <span>新建</span>
-          </span>
-        </van-button>
+        <h3>{{ multiSelect ? `已选 ${selectedKeys.length} 个会话` : '会话列表' }}</h3>
+        <div class="session-header__actions">
+          <van-button v-if="!multiSelect" size="small" class="new-session-btn" @click="handleNew">
+            <span class="new-session-btn__content">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
+              <span>新建</span>
+            </span>
+          </van-button>
+          <van-button v-if="!multiSelect" size="small" class="multi-select-btn" @click="enterMultiSelect">多选</van-button>
+          <van-button v-else size="small" class="multi-select-btn" @click="exitMultiSelect">取消</van-button>
+        </div>
       </div>
 
       <!-- Search -->
@@ -45,10 +49,17 @@
         <div
           v-for="s in filteredSessions"
           :key="s.sessionKey"
-          :class="['session-item', { active: s.active }]"
-          @click="handleSwitch(s)"
+          :class="['session-item', { active: s.active, selected: multiSelect && selectedKeys.includes(s.sessionKey) }]"
+          @click="handleItemClick(s)"
         >
-          <div class="session-icon">
+          <van-checkbox
+            v-if="multiSelect"
+            class="session-check"
+            :model-value="selectedKeys.includes(s.sessionKey)"
+            :disabled="s.active"
+            @click.stop="toggleSelect(s)"
+          />
+          <div v-else class="session-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
             </svg>
@@ -58,7 +69,7 @@
             <div class="session-time">{{ formatTime(s) }}</div>
           </div>
           <div v-if="s.active" class="session-active-badge">当前</div>
-          <button v-if="!s.active" @click.stop="handleDelete(s)" class="session-delete-btn">删除</button>
+          <button v-if="!multiSelect && !s.active" @click.stop="handleDelete(s)" class="session-delete-btn">删除</button>
         </div>
 
         <div v-if="sessions.length === 0 && !loading" class="session-empty">
@@ -69,13 +80,26 @@
         </div>
         <div v-if="loading" class="session-empty">加载中...</div>
       </div>
+
+      <div v-if="multiSelect" class="session-batch-bar">
+        <button class="batch-select-all" @click="toggleSelectAll">
+          {{ allSelected ? '取消全选' : '全选' }}
+        </button>
+        <button
+          class="batch-delete-btn"
+          :disabled="selectedKeys.length === 0 || batchDeleting"
+          @click="handleBatchDelete"
+        >
+          {{ batchDeleting ? '删除中...' : `删除(${selectedKeys.length})` }}
+        </button>
+      </div>
     </div>
   </van-popup>
 </template>
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { showConfirmDialog } from 'vant'
+import { showConfirmDialog, showNotify } from 'vant'
 import { API_BASE, API_SESSIONS, API_SESSION_NEW } from '../constants/index.js'
 
 const props = defineProps({
@@ -98,6 +122,10 @@ const sessions = ref([])
 const loading = ref(false)
 const searchQuery = ref('')
 
+const multiSelect = ref(false)
+const selectedKeys = ref([])
+const batchDeleting = ref(false)
+
 const filteredSessions = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
   if (!q) return sessions.value
@@ -113,9 +141,18 @@ const filteredSessions = computed(() => {
   })
 })
 
+const selectableSessions = computed(() => filteredSessions.value.filter(s => !s.active))
+const allSelected = computed(() =>
+  selectableSessions.value.length > 0 &&
+  selectableSessions.value.every(s => selectedKeys.value.includes(s.sessionKey))
+)
+
 // Clear search when drawer closes
 watch(visible, (v) => {
-  if (!v) searchQuery.value = ''
+  if (!v) {
+    searchQuery.value = ''
+    exitMultiSelect()
+  }
 })
 
 // Refresh session list when drawer opens or agent changes
@@ -179,9 +216,90 @@ async function handleDelete(s) {
     if (r.ok) {
       sessions.value = sessions.value.filter(x => x.sessionKey !== s.sessionKey)
       emit('delete', s.sessionKey)
+    } else {
+      const data = await r.json().catch(() => null)
+      showNotify({ type: 'danger', message: `删除失败: ${data?.detail || `错误码 ${r.status}`}` })
     }
   } catch (err) {
     console.error('[SessionList] delete failed:', err)
+    showNotify({ type: 'danger', message: '删除失败，请检查网络后重试' })
+  }
+}
+
+function enterMultiSelect() {
+  multiSelect.value = true
+  selectedKeys.value = []
+}
+
+function exitMultiSelect() {
+  multiSelect.value = false
+  selectedKeys.value = []
+}
+
+function handleItemClick(s) {
+  if (multiSelect.value) {
+    toggleSelect(s)
+  } else {
+    handleSwitch(s)
+  }
+}
+
+function toggleSelect(s) {
+  if (s.active) return
+  const i = selectedKeys.value.indexOf(s.sessionKey)
+  if (i >= 0) selectedKeys.value.splice(i, 1)
+  else selectedKeys.value.push(s.sessionKey)
+}
+
+function toggleSelectAll() {
+  if (allSelected.value) {
+    selectedKeys.value = []
+  } else {
+    selectedKeys.value = selectableSessions.value.map(s => s.sessionKey)
+  }
+}
+
+async function handleBatchDelete() {
+  if (selectedKeys.value.length === 0 || batchDeleting.value) return
+  try {
+    await showConfirmDialog({
+      title: '批量删除会话',
+      message: `确定要删除选中的 ${selectedKeys.value.length} 个会话吗？此操作不可恢复。`,
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      confirmButtonColor: '#FF4757',
+    })
+  } catch {
+    return
+  }
+  batchDeleting.value = true
+  let okCount = 0
+  const failKeys = []
+  for (const key of [...selectedKeys.value]) {
+    try {
+      const r = await fetch(`${API_BASE}/session/${encodeURIComponent(key)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${props.token}` },
+      })
+      if (r.ok) {
+        okCount++
+        sessions.value = sessions.value.filter(x => x.sessionKey !== key)
+        emit('delete', key)
+      } else {
+        failKeys.push(key)
+      }
+    } catch (err) {
+      console.error('[SessionList] batch delete failed:', key, err)
+      failKeys.push(key)
+    }
+  }
+  batchDeleting.value = false
+  if (failKeys.length === 0) {
+    showNotify({ type: 'success', message: `已删除 ${okCount} 个会话` })
+    exitMultiSelect()
+  } else {
+    selectedKeys.value = failKeys
+    showNotify({ type: 'danger', message: `已删除 ${okCount} 个，${failKeys.length} 个失败` })
   }
 }
 
@@ -259,6 +377,23 @@ function formatTime(s) {
   line-height: 1;
 }
 .new-session-btn:active { transform: scale(0.95); }
+
+.session-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.multi-select-btn.van-button {
+  background: transparent;
+  border: 1.5px solid var(--color-border);
+  color: var(--color-text-secondary);
+  padding: 0 12px;
+  height: 32px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.multi-select-btn.van-button:active { transform: scale(0.95); }
 
 .session-search {
   display: flex;
@@ -405,6 +540,53 @@ function formatTime(s) {
   color: var(--color-primary);
   font-weight: 600;
 }
+
+.session-item.selected {
+  background: rgba(99, 102, 241, 0.06);
+  border-color: var(--color-primary);
+}
+.session-check {
+  flex-shrink: 0;
+}
+
+.session-batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+.batch-select-all {
+  flex-shrink: 0;
+  border: 1.5px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-radius: 10px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.batch-select-all:active { transform: scale(0.95); }
+.batch-delete-btn {
+  flex: 1;
+  border: none;
+  background: var(--color-danger);
+  color: white;
+  border-radius: 10px;
+  padding: 9px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s;
+}
+.batch-delete-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.batch-delete-btn:not(:disabled):active { transform: scale(0.97); }
 
 .delete-btn {
   height: 100% !important;

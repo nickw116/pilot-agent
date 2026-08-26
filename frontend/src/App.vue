@@ -23,6 +23,7 @@
         :format-file-size="formatFileSize"
         :file-icon="fileIcon"
         :service-status="serviceStatus"
+        :down-reason="downReason"
         :current-model="currentModel"
         :sse-connected="eventStream.connected"
         :sse-reconnecting="eventStream.reconnecting"
@@ -214,7 +215,7 @@ function handlePreviewFile(info) {
 }
 const currentModel = ref('')
 const models = ref([])
-const { serviceStatus } = useServiceStatus()
+const { serviceStatus, downReason } = useServiceStatus()
 let modelPollTimer = null
 const MODEL_POLL_INTERVAL = 30000
 let _historyLoading = false

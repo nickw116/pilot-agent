@@ -39,7 +39,7 @@
     <transition name="banner-slide">
       <div v-if="serviceStatus === 'down'" class="service-banner service-banner--down">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        <span>服务正在重启，请稍候…</span>
+        <span>{{ downReason === 'timeout' ? '服务响应缓慢，正在等待恢复…' : '网络连接不稳定，正在重连…' }}</span>
       </div>
       <div v-else-if="serviceStatus === 'recovered'" class="service-banner service-banner--recovered">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
@@ -219,6 +219,7 @@ const props = defineProps({
   formatFileSize: { type: Function, default: () => '' },
   fileIcon: { type: Function, default: () => '📄' },
   serviceStatus: { type: String, default: 'up' },  // 'up' | 'down' | 'recovered'
+  downReason: { type: String, default: 'network' },  // 'network'（断网/弱网）| 'timeout'（服务无响应）
   currentModel: { type: String, default: '' },
   sseConnected: { type: Boolean, default: false },
   sseReconnecting: { type: Boolean, default: false },

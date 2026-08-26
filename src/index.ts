@@ -32,7 +32,11 @@ sessionMod.setRunLivenessChecker(agentModule.isRunActive);
 const PORT = parseInt(process.env.PORT || "8081", 10);
 
 const app = express();
-app.use(express.json({ limit: "100mb" }));
+// JSON 接口只承载文本消息与少量元数据，附件/音频一律走 multipart 上传。
+// 限制 body 大小可避免超大 JSON 在主线程解析时长时间阻塞事件循环，
+// 导致 /api/health 健康检查超时、前端误报"服务无响应"。
+const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || "2mb";
+app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
 // CORS
 app.use((_req, res, next) => {
